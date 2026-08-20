@@ -3,7 +3,20 @@ set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_dir}/backend"
-"${repo_dir}/.venv/bin/pyinstaller" --clean --noconfirm desktop_backend.spec
+
+# PATH first (CI installs pyinstaller directly, no project venv), falling
+# back to the repo's own .venv (Unix and Windows layouts) for local dev.
+if command -v pyinstaller >/dev/null 2>&1; then
+  pyinstaller_bin="pyinstaller"
+elif [[ -x "${repo_dir}/.venv/bin/pyinstaller" ]]; then
+  pyinstaller_bin="${repo_dir}/.venv/bin/pyinstaller"
+elif [[ -x "${repo_dir}/.venv/Scripts/pyinstaller.exe" ]]; then
+  pyinstaller_bin="${repo_dir}/.venv/Scripts/pyinstaller.exe"
+else
+  echo "pyinstaller not found on PATH or in .venv" >&2
+  exit 1
+fi
+"${pyinstaller_bin}" --clean --noconfirm desktop_backend.spec
 
 rustc_path="$(command -v rustc || true)"
 if [[ -z "${rustc_path}" ]]; then

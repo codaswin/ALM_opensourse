@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.aswin.ai-linkedin-manager",
   "build": {
-    "beforeDevCommand": "npm --prefix frontend run dev",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm --prefix frontend run build",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../frontend/dist"
   },
   "app": {
@@ -27,8 +27,19 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "externalBin": ["binaries/ai-linkedin-backend"],
+    "externalBin": [
+      "binaries/ai-linkedin-backend"
+    ],
     "category": "Business",
-    "shortDescription": "Human-controlled AI LinkedIn workspace"
+    "shortDescription": "Human-controlled AI LinkedIn workspace",
+    "longDescription": "AI LinkedIn Manager runs five specialized agents (research, content strategy, writing, engagement, analytics) against your own LinkedIn and model-provider credentials. Every publish, schedule, delete, reply, and connection request still requires your explicit approval.",
+    "copyright": "Copyright (c) Aswin",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
   }
 }

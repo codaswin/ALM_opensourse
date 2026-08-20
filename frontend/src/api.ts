@@ -3,9 +3,12 @@ import type {
   ApiErrorBody,
   ApprovalRequest,
   BrandVoice,
+  BackupManifest,
+  ConnectionTestResult,
   CostSummary,
   DashboardRole,
   DashboardUser,
+  DiagnosticsReport,
   LearningProposal,
   PlatformCredentialStatus,
   ReflectionResult,
@@ -263,6 +266,19 @@ export const saveCredentials = (platformId: string, values: Record<string, strin
 
 export const deleteCredentials = (platformId: string): Promise<{ deleted: boolean }> =>
   request(`/credentials/${encodeURIComponent(platformId)}`, { method: "DELETE" });
+
+export const testCredentials = (platformId: string): Promise<ConnectionTestResult> =>
+  request(`/credentials/${encodeURIComponent(platformId)}/test`, { method: "POST" });
+
+// -- Diagnostics --------------------------------------------------------------
+
+export const fetchDiagnostics = (): Promise<DiagnosticsReport> => request("/diagnostics");
+
+// -- Backups (desktop mode only) ----------------------------------------------
+
+export const listBackups = (): Promise<BackupManifest[]> => request("/backup");
+
+export const createBackup = (): Promise<BackupManifest> => request("/backup", { method: "POST" });
 
 // -- Admin: dashboard users (invite-only account creation) ------------------
 

@@ -59,3 +59,20 @@ async def test_desktop_api_skips_password_login_and_returns_local_owner(
         assert session.json()["csrf_token"] is None
         login = await client.post("/auth/login", json={"username": "x", "password": "y"})
         assert login.status_code == 404
+
+
+async def test_desktop_backup_create_and_list_round_trip(desktop_runtime: str) -> None:
+    headers = {"Authorization": f"Bearer {desktop_runtime}"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test", headers=headers) as client:
+        empty = await client.get("/backup")
+        assert empty.status_code == 200
+        assert empty.json() == []
+
+        created = await client.post("/backup")
+        assert created.status_code == 200
+        assert created.json()["includes_database"] is False
+
+        listed = await client.get("/backup")
+        assert listed.status_code == 200
+        assert len(listed.json()) == 1
+        assert listed.json()[0]["name"] == created.json()["name"]

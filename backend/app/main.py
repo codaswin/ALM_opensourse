@@ -24,6 +24,7 @@ import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from datetime import date, timedelta
 from typing import Any, Literal
 
@@ -39,7 +40,7 @@ from app.learning.proposal_review import (
     ProposalAlreadyDecidedError,
     ProposalNotFoundError,
 )
-from app.learning.scheduler import start_scheduler, stop_scheduler
+from app.learning.scheduler import get_scheduler, start_scheduler, stop_scheduler
 from app.llmops.anthropic_client import AnthropicConfigError
 from app.llmops.hermes_client import HermesCallError
 from app.llmops.openai_client import OpenAIConfigError
@@ -69,13 +70,19 @@ from app.safety.api_auth import (
     set_session_cookie,
 )
 from app.safety.secrets import CredentialEncryptionError
+from app import backup as backup_module
+from app import shared_state
+from app.rag.ingest import VectorStore
 from app.runtime import get_runtime_profile
 from app.tenancy.context import reset_current_user_id, set_current_user_id
+from app.tenancy.paths import user_vector_store_path
+from app.tools import connection_test
 from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = structlog.get_logger(__name__)
@@ -388,6 +395,79 @@ async def runtime_bootstrap(request: Request) -> dict[str, Any]:
     }
 
 
+@app.get("/diagnostics")
+async def diagnostics(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """One place to see whether every backing service actually works.
+
+    Desktop and hosted both swap real infrastructure behind the runtime
+    profile (SQLite/Redis, OS keyring/encrypted rows, ...) — this probes
+    each one live instead of assuming "the process started" means "every
+    dependency is healthy" (desktopv.md #31; the audit's "no diagnostic
+    view" gap). Never returns storage paths or secret values.
+    """
+    profile = get_runtime_profile()
+    components: dict[str, dict[str, Any]] = {"backend": {"status": "ok"}}
+
+    try:
+        await db.execute(text("SELECT 1"))
+        components["database"] = {"status": "ok", "backend": profile.database.value}
+    except Exception as exc:
+        components["database"] = {"status": "error", "backend": profile.database.value, "detail": exc.__class__.__name__}
+
+    try:
+        client = shared_state.get_client()
+        client.set("diagnostics:probe", "1", ex=5)
+        client.get("diagnostics:probe")
+        components["runtime_state"] = {"status": "ok", "backend": profile.state.value}
+    except Exception as exc:
+        components["runtime_state"] = {"status": "error", "backend": profile.state.value, "detail": exc.__class__.__name__}
+
+    scheduler = get_scheduler()
+    components["scheduler"] = {"status": "running" if (scheduler is not None and scheduler.running) else "stopped"}
+
+    try:
+        store = VectorStore(user_vector_store_path())
+        components["vector_store"] = {"status": "ok", "chunks": store.count()}
+    except Exception as exc:
+        components["vector_store"] = {"status": "error", "detail": exc.__class__.__name__}
+
+    components["credential_store"] = {"status": "ok", "backend": profile.credentials.value}
+    components["kill_switch"] = dict(kill_switch.get_pause_info())
+
+    return {"mode": profile.mode.value, "components": components}
+
+
+@app.get("/backup")
+async def list_backups() -> list[dict[str, Any]]:
+    """Desktop-only — hosted deployments back up PostgreSQL/Redis at the
+
+    infrastructure level (docs/data-boundaries.md), so this is always empty
+    in server mode rather than an error.
+    """
+    profile = get_runtime_profile()
+    if not profile.is_desktop:
+        return []
+    paths = ApplicationPaths.for_desktop(profile)
+    manifests = await asyncio.to_thread(backup_module.list_backups, paths)
+    return [asdict(m) for m in manifests]
+
+
+@app.post("/backup")
+async def create_backup_now() -> dict[str, Any]:
+    profile = get_runtime_profile()
+    if not profile.is_desktop:
+        raise HTTPException(
+            status_code=409,
+            detail="Hosted deployments back up PostgreSQL/Redis at the infrastructure level — use your database operator's backup process instead.",
+        )
+    paths = ApplicationPaths.for_desktop(profile)
+    try:
+        manifest = await asyncio.to_thread(backup_module.create_backup, paths)
+    except backup_module.BackupError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return asdict(manifest)
+
+
 @app.get("/activity")
 async def read_activity() -> dict[str, Any] | None:
     """Polled by the dashboard's ActivityBanner every ~1.2s — None means idle."""
@@ -547,6 +627,16 @@ async def clear_credentials(platform_id: str, request: Request, db: AsyncSession
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"deleted": deleted}
+
+
+@app.post("/credentials/{platform_id}/test")
+async def test_credentials(platform_id: str) -> dict[str, Any]:
+    """Actually calls the provider — "saved" and "working" are different claims.
+
+    Only reads the already-loaded per-user credential overlay/cached SDK
+    client; never logs or returns the credential value itself.
+    """
+    return dict(await connection_test.test_platform_connection(platform_id))
 
 
 # ---------------------------------------------------------------------------

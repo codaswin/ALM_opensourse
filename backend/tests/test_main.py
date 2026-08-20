@@ -149,6 +149,55 @@ async def test_authenticated_operator_can_pause_and_resume_system(client: AsyncC
 
 
 # ---------------------------------------------------------------------------
+# Diagnostics
+# ---------------------------------------------------------------------------
+
+
+async def test_diagnostics_reports_every_component_live(client: AsyncClient) -> None:
+    response = await client.get("/diagnostics")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "server"
+    components = body["components"]
+    for key in ("backend", "database", "runtime_state", "scheduler", "vector_store", "credential_store"):
+        assert components[key]["status"] in {"ok", "running", "stopped"}, key
+    assert isinstance(components["kill_switch"]["paused"], bool)
+
+
+async def test_diagnostics_requires_authentication(client: AsyncClient) -> None:
+    client.cookies.set(SESSION_COOKIE_NAME, "")
+    response = await client.get("/diagnostics")
+    assert response.status_code == 401
+
+
+async def test_test_credentials_reports_missing_when_no_key_saved(client: AsyncClient) -> None:
+    response = await client.post("/credentials/anthropic/test")
+    assert response.status_code == 200
+    assert response.json() == {
+        "platform_id": "anthropic",
+        "status": "missing",
+        "detail": "ANTHROPIC_API_KEY is not set. Set it on the Connections page before using route_and_call.",
+    }
+
+
+async def test_test_credentials_for_untestable_platform_reports_unavailable(client: AsyncClient) -> None:
+    response = await client.post("/credentials/linkedin/test")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["platform_id"] == "linkedin"
+    assert body["status"] == "unavailable"
+
+
+async def test_backup_is_a_no_op_in_hosted_server_mode(client: AsyncClient) -> None:
+    listed = await client.get("/backup")
+    assert listed.status_code == 200
+    assert listed.json() == []
+
+    created = await client.post("/backup")
+    assert created.status_code == 409
+
+
+# ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
 

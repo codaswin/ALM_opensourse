@@ -177,6 +177,53 @@ export interface ToolExecutionResult {
   latency_seconds?: number;
 }
 
+export type ConnectionStatus = "connected" | "invalid" | "missing" | "unavailable";
+
+export interface ConnectionTestResult {
+  platform_id: string;
+  status: ConnectionStatus;
+  detail: string;
+}
+
+// -- Diagnostics -------------------------------------------------------------
+// GET /diagnostics — live health of every backing service, not just
+// "the process started." Never carries storage paths or secret values.
+
+export type DiagnosticStatus = "ok" | "error" | "running" | "stopped";
+
+export interface DiagnosticComponent {
+  status: DiagnosticStatus;
+  backend?: string;
+  detail?: string;
+  chunks?: number;
+}
+
+export interface DiagnosticsReport {
+  mode: "desktop" | "server";
+  components: {
+    backend: DiagnosticComponent;
+    database: DiagnosticComponent;
+    runtime_state: DiagnosticComponent;
+    scheduler: DiagnosticComponent;
+    vector_store: DiagnosticComponent;
+    credential_store: DiagnosticComponent;
+    kill_switch: { paused: boolean; reason?: string | null; paused_by?: string | null; paused_at?: string | null };
+  };
+}
+
+// -- Backups (desktop mode only; empty/409 in hosted server mode — see
+// docs/data-boundaries.md, which treats hosted backups as an
+// infrastructure-operator concern instead) --------------------------------
+
+export interface BackupManifest {
+  name: string;
+  created_at: string;
+  includes_database: boolean;
+  includes_runtime_state: boolean;
+  includes_rag: boolean;
+  size_bytes: number;
+}
+
 // -- Admin: dashboard users ------------------------------------------------
 // Invite-only account creation — GET/POST /admin/users, admin role required.
 // Never carries a password or password hash.

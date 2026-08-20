@@ -62,6 +62,9 @@ dist/
 # Native sidecars are reproducible release artifacts, not source.
 src-tauri/binaries/ai-linkedin-backend-*
 src-tauri/target/
+# Tauri regenerates its capability/ACL JSON schemas (IDE autocomplete only,
+# not read at runtime) into this directory on every build.
+src-tauri/gen/
 
 
 # ============================================================

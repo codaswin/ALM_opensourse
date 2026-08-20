@@ -1,5 +1,5 @@
 import { Component, useEffect, useState, type ComponentType, type FormEvent, type ReactNode } from "react";
-import { Bot, BrainCircuit, ChevronRight, CircleDollarSign, Command, Eye, EyeOff, LockKeyhole, LogOut, Menu, MessageSquareText, Moon, Network, Settings2, ShieldCheck, Sparkles, Sun, Users, UserRound, Workflow, X } from "lucide-react";
+import { Activity, Bot, BrainCircuit, ChevronRight, CircleDollarSign, Command, Eye, EyeOff, LockKeyhole, LogOut, Menu, MessageSquareText, Moon, Network, Settings2, ShieldCheck, Sparkles, Sun, Users, UserRound, Workflow, X } from "lucide-react";
 import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import "./App.css";
 import { ApiError, getCurrentSession, getRuntimeBootstrap, initializeApiTransport, login, logout } from "./api";
@@ -11,6 +11,7 @@ import { ApprovalQueueView } from "./views/ApprovalQueueView";
 import { BrandVoiceView } from "./views/BrandVoiceView";
 import { ConnectionsView } from "./views/ConnectionsView";
 import { CostView } from "./views/CostView";
+import { DiagnosticsView } from "./views/DiagnosticsView";
 import { LandingPage } from "./views/LandingPage";
 import { LearningProposalsView } from "./views/LearningProposalsView";
 import { SettingsView } from "./views/SettingsView";
@@ -26,6 +27,7 @@ const TABS = [
   { id: "learning", label: "Self-Learning", description: "Review proposals", icon: BrainCircuit, group: "Intelligence", adminOnly: false, render: () => <LearningProposalsView /> },
   { id: "settings", label: "Agent Settings", description: "Configure behavior", icon: Settings2, group: "System", adminOnly: false, render: () => <SettingsView /> },
   { id: "cost", label: "Usage & Cost", description: "Track daily spend", icon: CircleDollarSign, group: "System", adminOnly: false, render: () => <CostView /> },
+  { id: "diagnostics", label: "Diagnostics", description: "Check service health", icon: Activity, group: "System", adminOnly: false, render: () => <DiagnosticsView /> },
   // Invite-only account creation — only admins can see or reach this tab
   // (also enforced server-side by require_role(minimum="admin") on
   // GET/POST /admin/users, so hiding the tab is a UX nicety, not the guard).

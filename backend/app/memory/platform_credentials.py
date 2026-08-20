@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from typing import Callable, Literal, TypedDict
 
+import structlog
 from app.llmops import anthropic_client, openai_client
 from app.application_paths import ApplicationPaths
 from app.credential_store import OSKeyringCredentialStore
@@ -194,6 +195,7 @@ PLATFORM_SCHEMA: tuple[PlatformDefinition, ...] = (
 
 _PLATFORMS_BY_ID = {p.id: p for p in PLATFORM_SCHEMA}
 _desktop_store: OSKeyringCredentialStore | None = None
+logger = structlog.get_logger(__name__)
 
 
 def _get_desktop_store() -> OSKeyringCredentialStore:
@@ -370,9 +372,20 @@ async def load_all_saved_credentials(db: AsyncSession) -> None:
             else:
                 continue
         except CredentialEncryptionError:
-            # A rotated/missing key must not prevent app startup. The row
-            # remains visible as saved in the Connections UI so a human can
-            # delete/re-save it with the current key.
+            # A rotated/missing CREDENTIAL_ENCRYPTION_KEY must not prevent
+            # app startup. The row remains visible as saved in the
+            # Connections UI (masked_preview is plaintext, stored
+            # separately from encrypted_value) so a human can delete/
+            # re-save it — but without this log line that state is
+            # otherwise silent: every downstream consumer just sees
+            # "not configured" with no hint that a credential exists but
+            # can no longer be decrypted with the current key.
+            logger.warning(
+                "credential_decrypt_failed_at_startup",
+                platform_id=record.platform_id,
+                field_name=record.field_name,
+                user_id=record.user_id,
+            )
             continue
         if platform.id in _GLOBAL_PLATFORMS:
             os.environ[field.env_var] = value

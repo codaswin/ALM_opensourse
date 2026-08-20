@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
-import { deleteCredentials, listCredentials, saveCredentials } from "../api";
+import { deleteCredentials, listCredentials, saveCredentials, testCredentials } from "../api";
 import { ErrorBanner } from "../components/ErrorBanner";
-import type { CredentialType, PlatformCredentialStatus } from "../types";
+import type { ConnectionStatus, ConnectionTestResult, CredentialType, PlatformCredentialStatus } from "../types";
+
+// Platforms `POST /credentials/{id}/test` can actually reach live — the
+// rest (e.g. LinkedIn itself, which is an OAuth-connected-account handled
+// entirely through Composio) have no independent connectivity check yet.
+const TESTABLE_PLATFORMS = new Set(["anthropic", "openai", "composio", "github", "reddit", "producthunt"]);
+
+const TEST_STATUS_LABEL: Record<ConnectionStatus, string> = {
+  connected: "Working",
+  invalid: "Rejected",
+  missing: "Missing",
+  unavailable: "Unreachable",
+};
 
 // Plain-language label for each credential shape — this is the answer to
 // "does this platform need a token, a login, an ID+secret pair, or an API
@@ -41,13 +53,29 @@ function PlatformCard({
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const canSave = platform.fields.every((f) => (draft[f.name] ?? "").trim());
 
+  async function handleTest() {
+    setTesting(true);
+    setError(null);
+    setTestResult(null);
+    try {
+      setTestResult(await testCredentials(platform.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTesting(false);
+    }
+  }
+
   async function handleSave() {
     setSaving(true);
     setError(null);
+    setTestResult(null);
     try {
       await saveCredentials(platform.id, draft);
       setDraft({});
@@ -62,6 +90,7 @@ function PlatformCard({
   async function handleRemove() {
     setRemoving(true);
     setError(null);
+    setTestResult(null);
     try {
       await deleteCredentials(platform.id);
       onChanged();
@@ -125,10 +154,24 @@ function PlatformCard({
 
       <p className="connection-help">{platform.help_text}</p>
 
+      {testResult && (
+        <p className="connection-help">
+          <span className={testResult.status === "connected" ? "badge badge-approved" : "badge badge-rejected"}>
+            {TEST_STATUS_LABEL[testResult.status]}
+          </span>{" "}
+          {testResult.detail}
+        </p>
+      )}
+
       <div className="card-actions">
         <button type="submit" disabled={saving || !canSave}>
           {saving ? "Saving…" : "Save"}
         </button>
+        {platform.connected && TESTABLE_PLATFORMS.has(platform.id) && (
+          <button type="button" onClick={() => void handleTest()} disabled={testing}>
+            {testing ? "Testing…" : "Test connection"}
+          </button>
+        )}
         {platform.connected && (
           <button type="button" className="btn-reject" onClick={() => void handleRemove()} disabled={removing}>
             {removing ? "Removing…" : "Remove"}

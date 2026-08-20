@@ -17,6 +17,36 @@ struct BackendState {
     child: Mutex<Option<CommandChild>>,
 }
 
+fn kill_backend(app: &tauri::AppHandle) {
+    if let Ok(mut child) = app.state::<BackendState>().child.lock() {
+        if let Some(process) = child.take() {
+            // The frozen sidecar's PyInstaller onefile bootloader forks a
+            // second process (the real interpreter) that inherits the
+            // bootloader's process group instead of getting its own —
+            // confirmed by launching a packaged build and observing that
+            // killing only the tracked child PID left that grandchild
+            // running as an orphan indefinitely. Signal the whole process
+            // group first so the real worker is reached too, then fall
+            // back to the plugin's own single-PID kill as a second attempt
+            // in case the group signal didn't reach it (e.g. it already
+            // detached). Windows has no equivalent of POSIX process groups
+            // here; that path still relies on the single-PID kill below
+            // and needs its own validation on a native Windows runner.
+            #[cfg(unix)]
+            {
+                let pid = process.pid() as libc::pid_t;
+                let pgid = unsafe { libc::getpgid(pid) };
+                if pgid > 0 {
+                    unsafe {
+                        libc::kill(-pgid, libc::SIGTERM);
+                    }
+                }
+            }
+            let _ = process.kill();
+        }
+    }
+}
+
 #[tauri::command]
 fn runtime_connection(state: State<'_, BackendState>) -> Result<RuntimeConnection, String> {
     state
@@ -107,19 +137,38 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        // Registering this plugin unconditionally panics `.build()` at
+        // startup ("invalid type: null, expected struct Config") unless
+        // `tauri.conf.json` has a `plugins.updater` block with a real
+        // pubkey/endpoint — confirmed by actually launching a packaged
+        // build, not just `cargo check`. There is no real signing identity
+        // yet (see docs/releasing.md); re-add this once the repository
+        // owner supplies one and configures `plugins.updater`, rather than
+        // shipping a placeholder key that could be mistaken for a real one.
+        // .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![runtime_connection])
         .setup(|app| spawn_backend(app.handle().clone()).map_err(Into::into))
         .build(tauri::generate_context!())
         .expect("failed to build AI LinkedIn Manager");
 
+    // `RunEvent::ExitRequested` below only fires for the graceful
+    // window-close / `app.exit()` path. A raw SIGTERM/SIGINT (`kill`,
+    // systemd stopping the unit, a session logout, many window managers'
+    // "force quit") bypasses that event loop entirely — confirmed by
+    // launching a packaged build and sending it SIGTERM directly, which
+    // left the frozen Python sidecar running as an orphan. This handler
+    // covers that path too, per desktopv.md #32 ("do not leave Python
+    // servers running after the desktop application exits unintentionally").
+    let signal_handle = app.handle().clone();
+    ctrlc::set_handler(move || {
+        kill_backend(&signal_handle);
+        std::process::exit(0);
+    })
+    .expect("failed to register termination signal handler");
+
     app.run(|app, event| {
         if let RunEvent::ExitRequested { .. } = event {
-            if let Ok(mut child) = app.state::<BackendState>().child.lock() {
-                if let Some(process) = child.take() {
-                    let _ = process.kill();
-                }
-            }
+            kill_backend(app);
         }
     });
 }

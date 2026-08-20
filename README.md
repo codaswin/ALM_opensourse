@@ -2,8 +2,10 @@
 
 > A multi-agent system that manages a professional's LinkedIn presence end-to-end — drafting on-brand posts, engaging with the feed, replying to comments and DMs, tracking connections, reporting on performance, and researching AI/agentic-AI developments across six independent sources — with every public, irreversible, or third-party-contacting action gated behind explicit human approval. No exceptions, verified by test.
 
+Free and open source (MIT). Run it as a **desktop app** on your own machine with your own credentials, or **self-host** it on a VPS for a team — same codebase, same safety guarantees, either way. Nobody's server, nobody's API keys, nobody's data but yours.
+
 <p align="center">
-  <em>5 runtime agents · 19 tools (6 require human approval) · 6 research sources · 574 tests</em>
+  <em>5 runtime agents · 19 tools (6 require human approval) · 6 research sources · 592 tests</em>
 </p>
 
 ---
@@ -11,27 +13,32 @@
 ## Table of Contents
 
 1. [What This Actually Is](#what-this-actually-is)
-2. [Design Philosophy](#design-philosophy)
-3. [System Architecture](#system-architecture)
-4. [The 5 Runtime Agents](#the-5-runtime-agents)
-5. [The Multi-Source Research System](#the-multi-source-research-system)
-6. [Safety & the Human-Approval Gate](#safety--the-human-approval-gate)
-7. [Tool Registry](#tool-registry)
-8. [Memory Architecture](#memory-architecture)
-9. [RAG Pipeline](#rag-pipeline)
-10. [Eval Harness](#eval-harness)
-11. [Self-Learning Loop](#self-learning-loop)
-12. [End-to-End Workflows](#end-to-end-workflows)
-13. [A Note on "Animations"](#a-note-on-animations)
-14. [Tech Stack](#tech-stack)
-15. [Project Structure](#project-structure)
-16. [Model Routing & Cost Controls](#model-routing--cost-controls)
-17. [Environment Variables](#environment-variables)
-18. [Getting Started](#getting-started)
-19. [Dashboard (Frontend)](#dashboard-frontend)
-20. [Testing & Validation Gates](#testing--validation-gates)
-21. [Roadmap](#roadmap)
-22. [How This Was Built](#how-this-was-built)
+2. [Install](#install)
+3. [Design Philosophy](#design-philosophy)
+4. [System Architecture](#system-architecture)
+5. [The 5 Runtime Agents](#the-5-runtime-agents)
+6. [The Multi-Source Research System](#the-multi-source-research-system)
+7. [Safety & the Human-Approval Gate](#safety--the-human-approval-gate)
+8. [Tool Registry](#tool-registry)
+9. [Memory Architecture](#memory-architecture)
+10. [RAG Pipeline](#rag-pipeline)
+11. [Eval Harness](#eval-harness)
+12. [Self-Learning Loop](#self-learning-loop)
+13. [End-to-End Workflows](#end-to-end-workflows)
+14. [A Note on "Animations"](#a-note-on-animations)
+15. [Tech Stack](#tech-stack)
+16. [Project Structure](#project-structure)
+17. [Model Routing & Cost Controls](#model-routing--cost-controls)
+18. [Environment Variables](#environment-variables)
+19. [Desktop Development](#desktop-development)
+20. [Self-Hosted Development](#self-hosted-development)
+21. [Dashboard (Frontend)](#dashboard-frontend)
+22. [Testing & Validation Gates](#testing--validation-gates)
+23. [Project Status](#project-status)
+24. [Roadmap](#roadmap)
+25. [How This Was Built](#how-this-was-built)
+26. [Contributing](#contributing)
+27. [License](#license)
 
 ---
 
@@ -51,9 +58,72 @@ Every one of those five agents shares one rule without exception: **no agent hol
 
 ---
 
+## Install
+
+Two ways to run it — same agents, same safety guarantees, same codebase:
+
+|  | **Desktop** | **Self-hosted** |
+|---|---|---|
+| Best for | One person, on their own computer | A team, or anyone who wants it always-on |
+| Runs on | Windows, macOS, Linux | Any VPS/server with Docker |
+| Database | SQLite (bundled, no setup) | PostgreSQL |
+| State/locks | Local SQLite | Redis |
+| Credentials | Your OS's own secure store (Windows Credential Manager / macOS Keychain / Linux Secret Service) | Encrypted database rows |
+| Login | None — the app is already yours | Username/password, invite-only accounts |
+| You need | Nothing pre-installed | Docker + Docker Compose |
+
+Both modes share every agent, every safety gate, the model router, the tool registry, and the approval queue — nothing about *what* the system will and won't do differs by runtime. See [`docs/architecture.md`](docs/architecture.md), [`docs/security-model.md`](docs/security-model.md), and [`docs/data-boundaries.md`](docs/data-boundaries.md) for the full design.
+
+### Desktop app
+
+The desktop shell is [Tauri](https://tauri.app/) (a Rust-owned window around the same React UI, spawning a frozen Python backend as a local sidecar — see [`docs/desktop-migration-audit.md`](docs/desktop-migration-audit.md) for why Tauri over Electron). It:
+
+- binds its backend to `127.0.0.1` on a random port with a per-launch auth token — nothing is reachable from outside your machine;
+- stores your LinkedIn/AI-provider credentials in your OS's own secure credential store, never in a plaintext file;
+- uses a local SQLite database and vector index instead of requiring you to install PostgreSQL or Redis;
+- requires no login — the app already knows it's yours.
+
+**Signed, downloadable installers aren't published yet** (see [Project Status](#project-status) — this is a genuinely new open-source project, not a promise deferred). Until then, build it yourself:
+
+```bash
+git clone https://github.com/codaswin/ALM_opensourse.git
+cd ALM_opensourse
+
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r backend/requirements.txt
+
+cd frontend && npm install && cd ..
+
+# Native prerequisites: Rust (rustup.rs) plus your OS's Tauri toolkit —
+# Linux needs WebKitGTK/GTK dev packages, Windows needs the WebView2 SDK
+# (usually already present) and Visual Studio Build Tools, macOS needs
+# Xcode Command Line Tools. Full list: docs/desktop-development.md.
+bash scripts/build-sidecar.sh
+npx @tauri-apps/cli@2 build   # or: cargo install tauri-cli, then `cargo tauri build`
+```
+
+This produces a native installer under `src-tauri/target/release/bundle/` — a `.AppImage`/`.deb`/`.rpm` on Linux, and the equivalent `.msi`/`.exe` or `.dmg`/`.app` once built on a Windows or macOS machine. First launch walks you through a short local onboarding, then you paste in your own Anthropic/OpenAI and Composio (LinkedIn) credentials on the Connections page — nothing is pre-filled, nothing is shared with anyone else's installation.
+
+### Self-hosted (VPS / server)
+
+For a team, or a workspace you want running even when your laptop is closed:
+
+```bash
+git clone https://github.com/codaswin/ALM_opensourse.git
+cd ALM_opensourse
+cp .env.example .env
+# at minimum: set CREDENTIAL_ENCRYPTION_KEY and DASHBOARD_ADMIN_PASSWORD
+
+docker compose up --build
+```
+
+Then open `http://localhost:5173` (or your server's address), sign in with the bootstrap admin account, and invite teammates from the Users page — each person gets their own private set of credentials, approvals, brand voice, and automation, invisible to everyone else (own database rows, own cached provider clients, own vector index namespace, own daily cost cap). For a real public deployment with HTTPS, a domain, and Docker secrets instead of a plaintext `.env`, follow [`deploy/README.md`](deploy/README.md).
+
+---
+
 ## Design Philosophy
 
-Four decisions shape everything else in this repo:
+Five decisions shape everything else in this repo:
 
 **1. Approval is structural, not a suggestion.** `requires_approval=True` on a tool isn't a flag some code path checks when convenient — `tools/registry.execute_tool()` refuses to run a gated tool without an explicit `approved=True`, and there is exactly **one function in the entire codebase** permitted to flip that flag: `safety.approval_gate.approve()`. A static audit (`python -m app.safety.audit`) fails the build if that ever stops being true.
 
@@ -61,7 +131,9 @@ Four decisions shape everything else in this repo:
 
 **3. Self-improvement is reviewed, never silent.** The learning loop can auto-apply a retrieval-weight tweak or an additive few-shot example on its own. It can **never** auto-apply a change to a system prompt, the brand-voice profile, a new tool, an approval-gating rule, or a confidence threshold — regardless of how confident the reflection job's own analysis is. That's enforced in code (`proposal_review.submit_proposal()`), not just policy.
 
-**4. Every agent is testable without a live model — even now that a live one exists.** Every agent function takes an injectable `llm_client`, and every one of this repo's tests still runs against a fake; the one real implementation (`model_router.route_and_call`, wired to Anthropic for primary/cheap and Hermes/vLLM for the worker tier) is itself just another value that fits the same `llm_client` slot. That was a deliberate sequencing choice: build and prove the harness, the safety gates, and the eval/learning infrastructure first — against fakes — and only then wire in a real model, so "real" never means "suddenly untestable."
+**4. Every agent is testable without a live model — even now that a live one exists.** Every agent function takes an injectable `llm_client`, and every one of this repo's tests still runs against a fake; the one real implementation (`model_router.route_and_call`, wired to Anthropic or OpenAI for primary/cheap and Hermes/vLLM for the worker tier) is itself just another value that fits the same `llm_client` slot. That was a deliberate sequencing choice: build and prove the harness, the safety gates, and the eval/learning infrastructure first — against fakes — and only then wire in a real model, so "real" never means "suddenly untestable."
+
+**5. Your credentials are yours, structurally, not by convention.** Every LinkedIn/AI-provider/research-source credential belongs to one owner — the desktop installation, or one self-hosted dashboard user — never a shared process-wide value. `resolve_credential()` has no fallback: a value only exists for the identity that saved it (`app/tenancy/`). That's what makes both distribution models the same codebase — desktop's "one local owner" and self-hosted's "many invited users" are the same ownership model at different scale, not a fork.
 
 ---
 
@@ -548,18 +620,22 @@ Being upfront: a plain `README.md` rendered on GitHub can't run real animation �
 | Layer | Choice | Why |
 |-------|--------|-----|
 | Orchestration | Custom typed Python harness with specialized agents | Keeps the agent boundaries, tracing, budgets, and approval contracts explicit |
-| Inference (primary) | Anthropic Claude | Hosted, strong generation quality |
+| Inference (primary) | Anthropic Claude or OpenAI (your own key, either provider) | Hosted, strong generation quality |
 | Inference (worker) | Hermes via vLLM (self-hosted, optional) | Cheap/fast for high-volume triage |
-| RAG | FAISS | No KG layer for MVP |
-| Serving | FastAPI (`app/main.py`) | Settings, approval queue, learning queue, cost, health |
-| Frontend | React + Vite + TypeScript (`frontend/`) | Shared UI for the Tauri desktop shell and optional hosted dashboard |
+| RAG | FAISS, one isolated index per user/installation | No KG layer for MVP |
+| Serving | FastAPI (`app/main.py`) | Settings, approval queue, learning queue, cost, health, diagnostics |
+| Desktop shell | [Tauri 2](https://tauri.app/) (Rust) + the same React UI | Owns the frozen Python sidecar's lifecycle, loopback auth, native window — no Electron/Node/Chromium runtime |
+| Backend packaging | PyInstaller (frozen sidecar binary, one per OS) | Desktop users never install Python themselves |
+| Frontend | React + Vite + TypeScript (`frontend/`) | Shared UI for the Tauri desktop shell and the self-hosted dashboard |
 | Scheduling | APScheduler | Reflection, research, engagement, retention, and approved publishing jobs |
-| Persistence | Desktop: SQLite + FAISS; server: Postgres + Redis + FAISS | Local-first defaults with hosted compatibility |
+| Database | Desktop: SQLite (WAL mode); Server: PostgreSQL | Local-first defaults, same SQLAlchemy models on both engines |
+| Runtime state / locks | Desktop: SQLite; Server: Redis | Working memory, rate/cost counters, kill switch, scheduler locks |
+| Credential storage | Desktop: your OS's native keyring (Credential Manager/Keychain/Secret Service); Server: encrypted database rows | Never plaintext, never in the frontend bundle, never shared between installations or users |
 | LinkedIn integration | Composio | Auth, token refresh, low-level rate limits offloaded |
 | X integration | Composio, read-only scope | Optional research source only |
 | Web search | `ddgs` (DuckDuckGo) | No API key, swappable via `WebSearchProvider` interface |
 | RSS parsing | `feedparser` | Handles RSS 2.0 / Atom / RDF dialect variance |
-| Testing | pytest + pytest-asyncio + pytest-cov | 574 tests |
+| Testing | pytest + pytest-asyncio + pytest-cov | 592 tests |
 
 ---
 
@@ -568,17 +644,22 @@ Being upfront: a plain `README.md` rendered on GitHub can't run real animation �
 ```
 backend/
 ├── app/
-│   ├── main.py               # FastAPI app — settings/approvals/learning-queue/cost/health
-│   ├── agents/              # The 5 runtime agents + research_pipeline/sources/schema
-│   ├── harness/              # run_step() — the sole LLM choke point, state machine, stopping conditions
-│   ├── tools/                 # 19 registered tools + sandbox + rate limiting + Composio client
-│   ├── memory/                # working / episodic / semantic stores
-│   ├── rag/                   # ingestion + retrieval (installation/user-isolated FAISS)
-│   ├── context/                # token-budget assembly + compaction
-│   ├── safety/                 # guardrails, approval gate, kill switch, cost cap, audit CLI
-│   ├── llmops/                  # model router (+ live route_and_call), anthropic/hermes clients, tracer
-│   ├── learning/                 # feedback capture, reflection job, proposal review queue, scheduler
-│   └── models/                    # SQLAlchemy models (approvals, feedback, proposals, settings, episodes)
+│   ├── main.py                # FastAPI app — settings/approvals/learning-queue/cost/health/diagnostics/backup
+│   ├── agents/                 # The 5 runtime agents + research_pipeline/sources/schema
+│   ├── harness/                 # run_step() — the sole LLM choke point, state machine, stopping conditions
+│   ├── tools/                  # 19 registered tools + sandbox + rate limiting + Composio client + connection_test.py
+│   ├── memory/                 # working / episodic / semantic stores + platform_credentials.py
+│   ├── rag/                    # ingestion + retrieval (installation/user-isolated FAISS, cross-platform locking)
+│   ├── context/                 # token-budget assembly + compaction
+│   ├── safety/                  # guardrails, approval gate, kill switch, cost cap, audit CLI
+│   ├── llmops/                   # model router (+ live route_and_call), anthropic/openai/hermes clients, tracer
+│   ├── learning/                  # feedback capture, reflection job, proposal review queue, scheduler
+│   ├── tenancy/                    # per-request/per-job user context, per-user credential overlay, RAG paths
+│   ├── runtime.py                   # RuntimeMode.DESKTOP vs .SERVER — the one immutable capability boundary
+│   ├── application_paths.py          # desktop app-data directory layout
+│   ├── credential_store.py            # OS-keyring adapter (desktop) — never plaintext
+│   ├── backup.py                       # desktop backup create/list (SQLite + RAG snapshot)
+│   └── models/                          # SQLAlchemy models (approvals, feedback, proposals, settings, episodes)
 ├── evals/                    # golden sets, metrics, LLM judge, regression-gate runner
 └── tests/                    # unit and integration tests for everything above
 
@@ -586,8 +667,20 @@ frontend/
 ├── src/
 │   ├── api.ts                # typed fetch client for every backend endpoint
 │   ├── types.ts               # response shapes, mirrors backend/app/main.py exactly
-│   └── views/                   # workflows, approvals, connections, brand voice, learning, settings, cost, users
+│   └── views/                   # workflows, approvals, connections, brand voice, learning, settings,
+│                                 # cost, diagnostics, users
 └── README.md                 # frontend-specific setup/build docs
+
+src-tauri/
+├── src/lib.rs                # spawns the sidecar, per-launch token, process-group cleanup on exit
+├── tauri.conf.json           # bundle config, icons, window, CSP
+├── icons/                    # native app icons (all platforms)
+└── binaries/                 # frozen per-OS sidecar, built by scripts/build-sidecar.sh (git-ignored)
+
+docs/
+├── architecture.md, security-model.md, data-boundaries.md   # current-state design docs
+├── desktop-development.md, packaging.md, releasing.md        # build/release instructions
+└── desktop-migration-audit.md, desktop-implementation-status.md   # how the desktop shell got here
 ```
 
 ---
@@ -613,60 +706,76 @@ Every `(agent, step)` pair resolves to exactly one tier — never hardcoded else
 
 ## Environment Variables
 
+**Only used in self-hosted mode.** The desktop app is configured entirely by its own onboarding UI and the OS keyring — it never reads `.env`. `python-dotenv` loads `.env` automatically for self-hosted mode; nothing else to wire up. See `.env.example` at the repo root for the complete, currently-accurate list.
+
+Two different kinds of variable live in `.env`, and mixing them up is the most common setup mistake:
+
+**Deployment-level** — one value for the whole server, set once in `.env`:
+
 ```env
-# --- Core infra ---
 DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/db
 REDIS_URL=redis://localhost:6379/0
 VECTOR_DB_PATH=./data/faiss_index
-CREDENTIAL_ENCRYPTION_KEY=       # required before saving dashboard credentials
+CREDENTIAL_ENCRYPTION_KEY=       # required before saving anyone's Connections credentials
 DASHBOARD_ADMIN_USERNAME=admin # bootstrap user, created only when absent
 DASHBOARD_ADMIN_PASSWORD=       # required; provide through a secret manager
 SESSION_COOKIE_SECURE=true      # false only for local HTTP development
 SESSION_TTL_HOURS=12
 APPROVAL_MAX_ATTEMPTS=3
 APPROVAL_EXECUTION_LEASE_SECONDS=900
+HERMES_ENDPOINT=http://localhost:8001/v1   # self-hosted worker model, shared by the whole deployment
+LLM_COST_BUDGET_DAILY_USD=10               # each user's own daily cap, same number for everyone
 
-# --- Inference ---
-ANTHROPIC_API_KEY=
-ANTHROPIC_MODEL_PRIMARY=claude-sonnet-5
-ANTHROPIC_MODEL_CHEAP=claude-haiku-4-5
-HERMES_ENDPOINT=http://localhost:8001/v1
-LLM_COST_BUDGET_DAILY_USD=10
-
-# --- Composio (LinkedIn required, X optional) ---
-COMPOSIO_API_KEY=
-COMPOSIO_LINKEDIN_CONNECTED_ACCOUNT_ID=
-COMPOSIO_X_CONNECTED_ACCOUNT_ID=
-
-# --- Rate caps ---
+# --- Rate caps (per user, per day) ---
 LINKEDIN_API_RATE_LIMIT_POSTS_DAILY=3
 LINKEDIN_API_RATE_LIMIT_DELETES_DAILY=3
 LINKEDIN_API_RATE_LIMIT_REPLIES_DAILY=20
 LINKEDIN_API_RATE_LIMIT_CONNECTIONS_DAILY=5
 LINKEDIN_API_RATE_LIMIT_LIKES_DAILY=20
-
-# --- Research sources (all optional except what you want active) ---
-REDDIT_CLIENT_ID=
-REDDIT_CLIENT_SECRET=
-REDDIT_USER_AGENT=ai-linkedin-manager-research-agent/1.0
-GITHUB_TOKEN=                    # optional — unauthenticated works at a lower rate
-PRODUCTHUNT_TOKEN=
-WEB_SEARCH_PROVIDER=duckduckgo   # duckduckgo | brave | none — no key needed for duckduckgo
-RSS_FEEDS=                       # leave unset to use the 8 built-in default feeds
 ```
 
-See `.env.example` at the repo root for the complete, currently-accurate list. `python-dotenv` loads `.env` automatically — nothing else to wire up.
+**Per-user — do not put these in `.env`.** Anthropic/OpenAI/Composio keys and every research-source credential (Reddit, GitHub, Product Hunt) belong to the individual dashboard user, not the deployment, and are pasted through the **Connections page** after signing in. `resolve_credential()` (`app/tenancy/credentials.py`) has zero fallback to `os.environ` for any of these — a value only exists for a user if that user saved it through Connections, full stop. `.env.example` still lists `ANTHROPIC_API_KEY=`/`COMPOSIO_API_KEY=`/etc. as reference placeholders (so you know the field names Connections expects), but setting them in `.env` has **no effect** on the running app; the only working path is Connections.
+
+Hacker News, RSS, and DuckDuckGo web search work with **zero credentials, for anyone** — they're not gated behind Connections at all.
 
 ---
 
-## Getting Started
+## Desktop Development
 
 ```bash
-git clone <this-repo-url>
-cd AI_LinkedIn_Manager
+git clone https://github.com/codaswin/ALM_opensourse.git
+cd ALM_opensourse
+
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r backend/requirements.txt
+cd frontend && npm install && cd ..
+
+# run the full test suite (no live credentials needed — everything runs on fakes)
+python -m pytest backend/tests backend/evals -v
+ruff check backend
+mypy backend/app --ignore-missing-imports
+PYTHONPATH=backend python -m app.tools.registry --validate-all-schemas
+PYTHONPATH=backend python -m app.safety.audit
+
+# run the desktop shell in dev mode (hot-reloading React + a live sidecar)
+bash scripts/build-sidecar.sh
+npx @tauri-apps/cli@2 dev   # or: cargo install tauri-cli, then `cargo tauri dev`
+```
+
+To produce an actual installer instead of a dev session, see [Install → Desktop app](#desktop-app) and [`docs/packaging.md`](docs/packaging.md). Full native-prerequisite list per OS: [`docs/desktop-development.md`](docs/desktop-development.md).
+
+---
+
+## Self-Hosted Development
+
+```bash
+git clone https://github.com/codaswin/ALM_opensourse.git
+cd ALM_opensourse
 
 cp .env.example .env
-# fill in ANTHROPIC_API_KEY, COMPOSIO_*, and any research-source credentials you have
+# fill in at minimum: CREDENTIAL_ENCRYPTION_KEY, DASHBOARD_ADMIN_PASSWORD
+# (Anthropic/OpenAI/Composio/research-source keys go through the Connections
+# page after you sign in, not .env — see Environment Variables above)
 
 python3 -m venv .venv
 . .venv/bin/activate
@@ -685,12 +794,17 @@ PYTHONPATH=backend python -m app.safety.audit
 cd backend
 uvicorn app.main:app --reload
 # → http://localhost:8000/docs for interactive API docs (settings, approval
-#   queue, learning-proposal queue, cost summary, health)
+#   queue, learning-proposal queue, cost summary, health, diagnostics)
+
+# in a second terminal — the dashboard
+cd frontend
+npm install
+npm run dev   # → http://localhost:5173
 ```
 
-Hacker News, RSS, and DuckDuckGo web search work with **zero configuration**. Reddit, GitHub, and Product Hunt need the credentials above (GitHub works unauthenticated too, just at a lower rate limit). Without `ANTHROPIC_API_KEY` set, agents still run in tests (against fakes) but any endpoint that triggers a real model call (e.g. `/learning/reflect`) will fail loudly rather than pretend to succeed.
+Without any provider key configured, agents still run in tests (against fakes) but any endpoint that triggers a real model call (e.g. `/learning/reflect`) fails loudly with a structured error rather than pretending to succeed.
 
-For a local production-like stack, use Docker Compose from the repo root:
+For a local production-like stack (PostgreSQL + Redis + built backend/frontend, no manual service setup), use Docker Compose from the repo root:
 
 ```bash
 docker compose up --build
@@ -698,7 +812,7 @@ docker compose up --build
 
 The backend container runs `alembic upgrade head` before starting Uvicorn. Runtime table creation is disabled by default; set `AUTO_CREATE_SCHEMA=true` only for isolated local or test databases. Docker Compose persists the generation-based FAISS store in the `vector_data` volume.
 
-For a public VPS test deployment with Caddy-managed HTTPS, private database
+For a public VPS deployment with Caddy-managed HTTPS, private database
 networking, Docker secrets, and automated backups, follow
 [`deploy/README.md`](deploy/README.md).
 
@@ -706,40 +820,44 @@ networking, Docker secrets, and automated backups, follow
 
 ## Dashboard (Frontend)
 
-A React + Vite + TypeScript single-page dashboard (`frontend/`) — one view per existing API resource, no component framework, no state-management library, no router. It's a review-and-decide tool, not a complex app, so `useState` and four view components cover it.
+A React + Vite + TypeScript single-page app (`frontend/`) — no component framework, no state-management library, no router; `useState` per view is enough for a review-and-decide tool. The exact same build runs two ways: embedded in the Tauri desktop window, and served as the self-hosted dashboard — the only thing that changes between them is which capabilities the backend's `/runtime/bootstrap` response reports (e.g. desktop mode hides the login screen and the Users page; the underlying views are identical code).
 
 ```mermaid
 flowchart LR
-    subgraph FE["frontend/ — Vite dev server, localhost:5173"]
-        AQ["Approval Queue view"]
-        SL["Self-Learning view"]
-        ST["Settings view"]
-        CO["Cost view"]
+    subgraph FE["frontend/ — same build, two hosts"]
+        WF["Workflows"]
+        AQ["Approval Queue"]
+        CN["Connections"]
+        BV["Brand Voice"]
+        SL["Self-Learning"]
+        ST["Settings"]
+        CO["Cost"]
+        DG["Diagnostics"]
+        US["Users (server only)"]
     end
-    API["FastAPI — localhost:8000<br/>CORS-enabled for the dashboard's origin"]
-    AQ & SL & ST & CO -->|fetch, JSON| API
+    Tauri["Tauri window<br/>loopback + per-launch token"]
+    API["FastAPI — self-hosted<br/>CORS-enabled for the dashboard's origin"]
+    FE -->|desktop| Tauri
+    FE -->|self-hosted| API
     style API fill:#0891b2,color:#fff
+    style Tauri fill:#7c3aed,color:#fff
 ```
 
 | View | Backend resource | What you can do |
 |------|-------------------|-------------------|
 | **Workflows** | `/workflows/*` | Manually trigger research, content, analytics, and engagement runs |
-| **Connections** | `/credentials/*` | Save API keys/tokens/connected-account IDs encrypted at rest |
+| **Approval Queue** | `/approvals/*` | See every pending gated action with full argument content shown (never a bare post ID) — approve, reject, or retry |
+| **Connections** | `/credentials/*`, `/credentials/{id}/test` | Save API keys/tokens/connected-account IDs (encrypted at rest / OS keyring), then actually test them against the real provider — `connected` / `invalid` / `missing` / `unavailable`, not just "a value is stored" |
 | **Brand Voice** | `/brand-voice/*` | Maintain titled brand-voice profiles that are also ingested into RAG |
-| **Approval Queue** | `/approvals/*` | See every pending gated action with full argument content shown (never a bare post ID) — approve or reject |
 | **Self-Learning** | `/learning/proposals/*`, `/learning/reflect` | Review reflection-job proposals (flagged clearly when a type can never auto-apply), trigger an on-demand reflection run |
-| **Settings** | `/settings/{key}` | View/edit agent settings like `research_agent.poll_interval` |
+| **Settings** | `/settings/{key}`, `/system/pause`, `/system/resume` | View/edit agent settings, and the kill switch — pause every approved external action system-wide |
 | **Cost** | `/cost` | Today's LLM spend vs. the daily cap, as a progress bar |
+| **Diagnostics** | `/diagnostics` | Live health of the database, runtime-state store, scheduler, vector store, credential store, and kill switch — plus, in desktop mode, one-click workspace backups |
+| **Users** (admin, server only) | `/admin/users` | Invite teammates — each gets their own fully isolated workspace |
 
-Every action carries a server-derived `decided_by` identity. Hosted mode uses the authenticated account; desktop mode uses the installation's stable local-owner identity. The same approval and proposal audit trails remain active in both modes.
+Every action carries a server-derived `decided_by` identity. Self-hosted mode uses the authenticated account; desktop mode uses the installation's stable local-owner identity. The same approval and proposal audit trails remain active in both modes.
 
-```bash
-cd frontend
-npm install
-npm run dev   # → http://localhost:5173
-```
-
-Requires the backend running separately (see [Getting Started](#getting-started)) with CORS allowing the dashboard's origin — `CORS_ALLOWED_ORIGINS` in `.env.example` already defaults to Vite's dev-server ports. The dashboard signs in through an HttpOnly server session and sends a CSRF token for mutations; no secret is compiled into the browser bundle. Full setup/build details: `frontend/README.md`.
+Requires the backend running separately in self-hosted mode (see [Self-Hosted Development](#self-hosted-development)) with CORS allowing the dashboard's origin — `CORS_ALLOWED_ORIGINS` in `.env.example` already defaults to Vite's dev-server ports. The dashboard signs in through an HttpOnly server session and sends a CSRF token for mutations; no secret is compiled into the browser bundle. In desktop mode there's no session cookie at all — the Tauri shell authenticates the webview to its own sidecar directly. Full setup/build details: `frontend/README.md`.
 
 ---
 
@@ -764,9 +882,34 @@ pytest backend/tests backend/evals --cov=backend/app --cov=backend/evals --cov-f
 PYTHONPATH=backend python -m app.tools.registry --validate-all-schemas
 PYTHONPATH=backend python -m app.safety.audit
 cd frontend && npm run lint && npm run build
+
+# Desktop shell (needs Rust + your OS's Tauri prerequisites — docs/desktop-development.md)
+python scripts/check-version.py
+bash scripts/build-sidecar.sh
+cd src-tauri && cargo check
 ```
 
-Current state: **574 tests passing**, ruff/mypy clean, frontend lint/build clean, tool-registry audit green, safety audit green.
+Current state: **592 tests passing**, ruff/mypy clean, frontend lint/build clean, tool-registry audit green, safety audit green. `.github/workflows/ci.yml` runs the backend and frontend gates above on every push/PR, plus a `desktop` job that compiles the Tauri shell natively on Ubuntu, Windows, and macOS runners.
+
+---
+
+## Project Status
+
+Honest state, not aspirational: **version 0.1.0 is a working desktop development build and a working self-hosted deployment — not a signed, downloadable release yet.**
+
+What's real and tested today:
+
+- Every agent, safety gate, tool, eval, and the self-learning loop — all of it, in both runtime modes.
+- Self-hosted mode: install via Docker Compose, works end-to-end, multi-tenant isolation between invited users verified (separate credentials, brand voice, approvals, cost caps — nothing leaks between accounts).
+- Desktop mode on Linux: building it produces a real, working `.deb`/`.rpm`/`.AppImage`; smoke-tested — launches without any manually-installed Python/PostgreSQL/Redis, migrates its own SQLite database, authenticates its loopback API, and shuts down its sidecar cleanly with no orphan process (a real bug found and fixed this way: the frozen sidecar's own child process used to survive after the app closed).
+
+What's not done yet:
+
+- **Windows and macOS installers** haven't been built and smoke-tested on native machines — only compiled (`cargo check`) on GitHub-hosted CI runners so far. There's no guarantee a packaged build behaves identically there until that happens.
+- **No code-signing, notarization, or update mechanism** exists yet — installers you build yourself are unsigned, and there's no auto-updater configured. That's a deliberate choice: shipping a real, secure signing/update pipeline is real infrastructure work, not something to fake.
+- **No pre-built downloads** — every install path in this README involves building from source. A GitHub Releases page with real signed artifacts is the natural next milestone once the above is done.
+
+See [`docs/desktop-implementation-status.md`](docs/desktop-implementation-status.md) for the detailed, continuously-updated list of what's verified vs. still open, and [`docs/desktop-migration-audit.md`](docs/desktop-migration-audit.md) for how the desktop shell was designed.
 
 ---
 
@@ -781,17 +924,25 @@ Current state: **574 tests passing**, ruff/mypy clean, frontend lint/build clean
 - [x] Self-learning loop with hard human-review lines
 - [x] Production automation for research, engagement polling, retention, and approved scheduled publishing
 - [x] Episodic analytics aggregation with real impressions, engagement, follower, and top-post metrics
-- [x] FastAPI serving layer (`main.py`) — settings, approval queue, learning-proposal queue, cost, health, all over the same tested infrastructure above
+- [x] FastAPI serving layer (`main.py`) — settings, approval queue, learning-proposal queue, cost, health, diagnostics, backup, all over the same tested infrastructure above
 - [x] Self-learning loop running on an actual schedule (`learning/scheduler.py`, APScheduler, weekly by default, wired into the app's startup lifespan)
-- [x] A real live LLM client (`model_router.route_and_call`) — Anthropic for primary/cheap tiers, Hermes/vLLM (OpenAI-compatible) for the worker tier, both via a forced structured tool-call so every existing agent's response-parsing contract is untouched
-- [x] Dashboard UI for workflows, connections, brand voice, approval queue, self-learning queue, agent settings, and cost (`frontend/`, React + Vite)
-- [x] Production hardening: encrypted credential store, optional dashboard API-key guard, Alembic-first startup, durable lock-protected FAISS snapshots, Docker Compose, CI, and centralized Python tooling config
+- [x] A real live LLM client (`model_router.route_and_call`) — Anthropic or OpenAI for primary/cheap tiers, Hermes/vLLM (OpenAI-compatible) for the worker tier, both via a forced structured tool-call so every existing agent's response-parsing contract is untouched
+- [x] Dashboard UI for workflows, connections, brand voice, approval queue, self-learning queue, agent settings, cost, diagnostics, and user administration (`frontend/`, React + Vite)
+- [x] Multi-tenant self-hosted mode — invite-only accounts, each with fully isolated credentials, brand voice, RAG index, approvals, and cost cap
+- [x] Desktop runtime mode — Tauri shell, frozen Python sidecar, SQLite + OS keyring, no login, no PostgreSQL/Redis dependency
+- [x] Live-tested provider connectivity checks (`POST /credentials/{id}/test`) and a Diagnostics view for every backing service
+- [x] Production hardening: encrypted credential store (server) / OS keyring (desktop), Alembic-first startup with pre-migration backup, durable lock-protected FAISS snapshots, Docker Compose, CI (backend + frontend + native desktop compile matrix), and centralized Python tooling config
+
+**In progress / explicitly not done:**
+- [ ] Signed Windows and macOS installers, built and smoke-tested on native machines
+- [ ] Code signing, notarization, and an auto-updater
+- [ ] A GitHub Releases page with downloadable, pre-built artifacts
 
 **Explicitly post-MVP (per the original spec):**
 - [ ] Connection-relationship knowledge graph
 - [ ] Analytics-driven auto-scheduling
 
-**Known limitations carried into the live client:** `RouteAndCallResponse.tool_calls` is always `[]` — no runtime agent built in this codebase ever passes a non-`None` `tool_executor` to `run_step()` (agents call `tools.registry.execute_tool()` directly outside the harness loop), so harness-native tool execution/logging remains future work. Anthropic pricing in `.env.example` is placeholder defaults, not verified real per-token pricing — override before trusting the cost cap for anything real.
+**Known limitations carried into the live client:** `RouteAndCallResponse.tool_calls` is always `[]` — no runtime agent built in this codebase ever passes a non-`None` `tool_executor` to `run_step()` (agents call `tools.registry.execute_tool()` directly outside the harness loop), so harness-native tool execution/logging remains future work. Anthropic/OpenAI pricing in `.env.example` is placeholder defaults, not verified real per-token pricing — override before trusting the cost cap for anything real.
 
 ---
 
@@ -802,6 +953,26 @@ This system was built PRP-style: a detailed spec (`INITIAL.md`) generated a full
 ```
 Phase 1 (Foundation) → Phase 2 (5 runtime agents + safety) → Phase 3 (evals + self-learning)
   → Phase 4 (FastAPI serving layer + scheduled learning loop) → Phase 5 (live LLM client)
+  → Phase 6 (multi-tenant self-hosted mode) → Phase 7 (desktop migration)
 ```
 
-Each phase's validation gate had to pass before the next started. Every non-trivial design decision in this codebase — why X is optional, why deletion has no confidence bypass, why `system_prompt` changes can never auto-apply — traces back to an explicit requirement in that original spec, not an implementation afterthought.
+Each phase's validation gate had to pass before the next started. Every non-trivial design decision in this codebase — why X is optional, why deletion has no confidence bypass, why `system_prompt` changes can never auto-apply, why the desktop shell is Tauri instead of Electron — traces back to an explicit requirement in that phase's spec, not an implementation afterthought. The desktop migration specifically followed `desktopv.md`'s brief through a repository audit (`docs/desktop-migration-audit.md`) and a PRP (`docs/prp/desktop-production-migration.md`) before any runtime code changed.
+
+---
+
+## Contributing
+
+Issues and pull requests are welcome. Before opening a PR:
+
+1. Read [`CLAUDE.md`](CLAUDE.md) — the non-negotiable rules (approval gating, the LLM choke point, no silent context truncation, no capability without an eval) apply to human contributors exactly as much as to an AI agent working on this repo.
+2. Run the [validation gates](#testing--validation-gates) relevant to what you changed before pushing.
+3. If you touch anything under `backend/app/safety/`, `backend/app/tools/registry.py`, or approval-gating logic, run `python -m backend.app.safety.audit` explicitly and explain in the PR description why the change preserves every existing invariant.
+4. New agent capabilities need a golden-set eval added under `backend/evals/` — a capability without one isn't considered done, per `CLAUDE.md`.
+
+For desktop-shell changes specifically, see [`docs/desktop-development.md`](docs/desktop-development.md) for native prerequisites per OS, and [`docs/security-model.md`](docs/security-model.md) for the threat model any change there needs to preserve (loopback-only binding, per-launch token, no plaintext credential fallback).
+
+---
+
+## License
+
+[MIT](LICENSE) — do whatever you want with this, including running your own fork against your own LinkedIn account and your own model provider. No attribution required, though it's appreciated.
