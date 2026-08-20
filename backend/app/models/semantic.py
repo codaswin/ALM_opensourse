@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, Integer, String
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -21,6 +21,9 @@ class SemanticMemoryRecord(Base):
     __tablename__ = "semantic_memory_records"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("dashboard_users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     vector_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True, index=True)
     entity_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     category: Mapped[str] = mapped_column(String, nullable=False, index=True)

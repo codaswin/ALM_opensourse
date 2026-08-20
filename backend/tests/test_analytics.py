@@ -295,12 +295,12 @@ async def test_generate_weekly_digest_aggregates_real_episode_data(db_session) -
 
     db_session.add_all([
         PostEpisode(
-            entity_id="owner", post_id="post-a", content="A",
+            user_id=_USER, entity_id="owner", post_id="post-a", content="A",
             published_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
             impressions=100, likes=10, comments=5, shares=5, follower_delta=3,
         ),
         PostEpisode(
-            entity_id="owner", post_id="post-b", content="B",
+            user_id=_USER, entity_id="owner", post_id="post-b", content="B",
             published_at=datetime(2026, 8, 3, tzinfo=timezone.utc),
             impressions=300, likes=15, comments=10, shares=5, follower_delta=2,
         ),
@@ -324,12 +324,12 @@ async def test_generate_weekly_digest_excludes_other_users_posts(db_session) -> 
 
     db_session.add_all([
         PostEpisode(
-            entity_id="owner", post_id="post-mine", content="mine",
+            user_id=_USER, entity_id="owner", post_id="post-mine", content="mine",
             published_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
             impressions=100, likes=10, comments=5, shares=5, follower_delta=3,
         ),
         PostEpisode(
-            entity_id="someone-else", post_id="post-theirs", content="theirs",
+            user_id="someone-else", entity_id="someone-else", post_id="post-theirs", content="theirs",
             published_at=datetime(2026, 8, 3, tzinfo=timezone.utc),
             impressions=99999, likes=999, comments=999, shares=999, follower_delta=999,
         ),

@@ -59,6 +59,10 @@ htmlcov/
 build/
 dist/
 
+# Native sidecars are reproducible release artifacts, not source.
+src-tauri/binaries/ai-linkedin-backend-*
+src-tauri/target/
+
 
 # ============================================================
 # DATABASES / LOCAL DATA

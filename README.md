@@ -3,7 +3,7 @@
 > A multi-agent system that manages a professional's LinkedIn presence end-to-end — drafting on-brand posts, engaging with the feed, replying to comments and DMs, tracking connections, reporting on performance, and researching AI/agentic-AI developments across six independent sources — with every public, irreversible, or third-party-contacting action gated behind explicit human approval. No exceptions, verified by test.
 
 <p align="center">
-  <em>5 runtime agents · 19 tools (6 require human approval) · 6 research sources · 497 tests · 88.33% coverage</em>
+  <em>5 runtime agents · 19 tools (6 require human approval) · 6 research sources · 574 tests</em>
 </p>
 
 ---
@@ -342,7 +342,7 @@ A static audit enforces all of this stays true: `python -m app.safety.audit` wal
 | **`reply_to_dm`** | ✅ | Private message to a real third party |
 | **`send_connection_request`** | ✅ | Connection request — ToS-sensitive |
 
-Every tool has a Pydantic input schema (CLAUDE.md forbids a tool without one), every call is sandboxed with a timeout, and every execution is logged with inputs/outputs/latency/cost before the loop continues.
+Every tool has a Pydantic input schema and every call is sandboxed with a timeout. Harness-managed calls retain full input/output/latency/cost records, while direct registry executions emit structured status and latency logs.
 
 ---
 
@@ -384,7 +384,7 @@ Retention: episodic post/engagement data kept 12 months then archived; DM/commen
 | Comment/DM threads | Q&A pairs | Continuous | 1 chunk/thread |
 | Research notes (multi-source) | Structured | Per research run | 1 chunk/note, deduped |
 
-A single shared FAISS-backed `VectorStore` handles all five, idempotent by `(source_type, source_id)` — re-ingesting an edited document evicts its old chunks before adding fresh ones, so the index never silently accumulates duplicates.
+Each desktop installation and hosted user gets an isolated FAISS-backed `VectorStore`. Ingestion is idempotent by `(source_type, source_id)` — re-ingesting an edited document evicts its old chunks before adding fresh ones, so the index never silently accumulates duplicates.
 
 ---
 
@@ -547,19 +547,19 @@ Being upfront: a plain `README.md` rendered on GitHub can't run real animation �
 
 | Layer | Choice | Why |
 |-------|--------|-----|
-| Orchestration | CrewAI-style role-based agents | Simpler fit than a conversational pattern for this workflow |
+| Orchestration | Custom typed Python harness with specialized agents | Keeps the agent boundaries, tracing, budgets, and approval contracts explicit |
 | Inference (primary) | Anthropic Claude | Hosted, strong generation quality |
 | Inference (worker) | Hermes via vLLM (self-hosted, optional) | Cheap/fast for high-volume triage |
 | RAG | FAISS | No KG layer for MVP |
 | Serving | FastAPI (`app/main.py`) | Settings, approval queue, learning queue, cost, health |
-| Frontend | React + Vite + TypeScript (`frontend/`) | One view per API resource, no framework/state-library overhead needed at this size |
+| Frontend | React + Vite + TypeScript (`frontend/`) | Shared UI for the Tauri desktop shell and optional hosted dashboard |
 | Scheduling | APScheduler | Reflection, research, engagement, retention, and approved publishing jobs |
-| Persistence | Postgres + Redis + FAISS | Episodic / working / semantic split |
+| Persistence | Desktop: SQLite + FAISS; server: Postgres + Redis + FAISS | Local-first defaults with hosted compatibility |
 | LinkedIn integration | Composio | Auth, token refresh, low-level rate limits offloaded |
 | X integration | Composio, read-only scope | Optional research source only |
 | Web search | `ddgs` (DuckDuckGo) | No API key, swappable via `WebSearchProvider` interface |
 | RSS parsing | `feedparser` | Handles RSS 2.0 / Atom / RDF dialect variance |
-| Testing | pytest + pytest-asyncio + pytest-cov | 510 tests, 87.99% coverage |
+| Testing | pytest + pytest-asyncio + pytest-cov | 574 tests |
 
 ---
 
@@ -573,21 +573,20 @@ backend/
 │   ├── harness/              # run_step() — the sole LLM choke point, state machine, stopping conditions
 │   ├── tools/                 # 19 registered tools + sandbox + rate limiting + Composio client
 │   ├── memory/                # working / episodic / semantic stores
-│   ├── rag/                   # ingestion + retrieval (shared FAISS VectorStore)
+│   ├── rag/                   # ingestion + retrieval (installation/user-isolated FAISS)
 │   ├── context/                # token-budget assembly + compaction
 │   ├── safety/                 # guardrails, approval gate, kill switch, cost cap, audit CLI
 │   ├── llmops/                  # model router (+ live route_and_call), anthropic/hermes clients, tracer
 │   ├── learning/                 # feedback capture, reflection job, proposal review queue, scheduler
 │   └── models/                    # SQLAlchemy models (approvals, feedback, proposals, settings, episodes)
 ├── evals/                    # golden sets, metrics, LLM judge, regression-gate runner
-└── tests/                    # 350+ tests for everything above
+└── tests/                    # unit and integration tests for everything above
 
 frontend/
 ├── src/
 │   ├── api.ts                # typed fetch client for every backend endpoint
 │   ├── types.ts               # response shapes, mirrors backend/app/main.py exactly
-│   ├── ActorProvider.tsx       # persisted "acting as" identity for approve/reject calls
-│   └── views/                   # ApprovalQueueView, LearningProposalsView, SettingsView, CostView
+│   └── views/                   # workflows, approvals, connections, brand voice, learning, settings, cost, users
 └── README.md                 # frontend-specific setup/build docs
 ```
 
@@ -732,7 +731,7 @@ flowchart LR
 | **Settings** | `/settings/{key}` | View/edit agent settings like `research_agent.poll_interval` |
 | **Cost** | `/cost` | Today's LLM spend vs. the daily cap, as a progress bar |
 
-Every action carries a `decided_by` identity, set via the "Acting as" field in the header (persisted to `localStorage`) — the same audit trail `approval_gate.approve()`/`reject()` and `proposal_review.approve_proposal()`/`reject_proposal()` already record for every decision, human or otherwise.
+Every action carries a server-derived `decided_by` identity. Hosted mode uses the authenticated account; desktop mode uses the installation's stable local-owner identity. The same approval and proposal audit trails remain active in both modes.
 
 ```bash
 cd frontend
@@ -767,7 +766,7 @@ PYTHONPATH=backend python -m app.safety.audit
 cd frontend && npm run lint && npm run build
 ```
 
-Current state: **510 tests passing, 87.99% coverage**, ruff/mypy clean, frontend lint/build clean, tool-registry audit green, safety audit green.
+Current state: **574 tests passing**, ruff/mypy clean, frontend lint/build clean, tool-registry audit green, safety audit green.
 
 ---
 

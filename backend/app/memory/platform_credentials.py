@@ -5,8 +5,12 @@ from dataclasses import dataclass
 from typing import Callable, Literal, TypedDict
 
 from app.llmops import anthropic_client, openai_client
+from app.application_paths import ApplicationPaths
+from app.credential_store import OSKeyringCredentialStore
+from app.local_identity import load_or_create_local_identity
 from app.models.platform_credential import PlatformCredentialRecord
 from app.safety.secrets import CredentialEncryptionError, decrypt_secret, encrypt_secret, mask_secret
+from app.runtime import get_runtime_profile
 from app.tenancy import credentials as tenancy_credentials
 from app.tools import composio_client
 from sqlalchemy import delete, select
@@ -189,6 +193,21 @@ PLATFORM_SCHEMA: tuple[PlatformDefinition, ...] = (
 )
 
 _PLATFORMS_BY_ID = {p.id: p for p in PLATFORM_SCHEMA}
+_desktop_store: OSKeyringCredentialStore | None = None
+
+
+def _get_desktop_store() -> OSKeyringCredentialStore:
+    global _desktop_store
+    if _desktop_store is None:
+        profile = get_runtime_profile()
+        identity = load_or_create_local_identity(ApplicationPaths.for_desktop(profile))
+        _desktop_store = OSKeyringCredentialStore(identity.installation_id)
+    return _desktop_store
+
+
+def configure_desktop_store(store: OSKeyringCredentialStore | None) -> None:
+    global _desktop_store
+    _desktop_store = store
 
 
 def _record_id(user_id: str, platform_id: str, field_name: str) -> str:
@@ -269,6 +288,8 @@ async def save_platform_credentials(db: AsyncSession, user_id: str, platform_id:
         raise ValueError(f"Unknown credential field(s) for {platform_id!r}: {', '.join(extra)}")
 
     is_global = platform_id in _GLOBAL_PLATFORMS
+    desktop = get_runtime_profile().is_desktop
+    desktop_store = _get_desktop_store() if desktop else None
     await db.execute(
         delete(PlatformCredentialRecord).where(
             PlatformCredentialRecord.user_id == user_id, PlatformCredentialRecord.platform_id == platform_id
@@ -281,9 +302,11 @@ async def save_platform_credentials(db: AsyncSession, user_id: str, platform_id:
             user_id=user_id,
             platform_id=platform_id,
             field_name=field.name,
-            encrypted_value=encrypt_secret(raw_value),
+            encrypted_value=None if desktop else encrypt_secret(raw_value),
             masked_preview=_preview_value(raw_value, secret=field.secret),
         ))
+        if desktop_store is not None:
+            desktop_store.set(user_id, field.env_var, raw_value)
         if is_global:
             os.environ[field.env_var] = raw_value
         else:
@@ -297,6 +320,7 @@ async def save_platform_credentials(db: AsyncSession, user_id: str, platform_id:
 async def delete_platform_credentials(db: AsyncSession, user_id: str, platform_id: str) -> bool:
     platform = _get_platform(platform_id)
     is_global = platform_id in _GLOBAL_PLATFORMS
+    desktop_store = _get_desktop_store() if get_runtime_profile().is_desktop else None
     result = await db.execute(
         delete(PlatformCredentialRecord).where(
             PlatformCredentialRecord.user_id == user_id, PlatformCredentialRecord.platform_id == platform_id
@@ -304,6 +328,8 @@ async def delete_platform_credentials(db: AsyncSession, user_id: str, platform_i
     )
     await db.commit()
     for field in platform.fields:
+        if desktop_store is not None:
+            desktop_store.delete(user_id, field.env_var)
         if is_global:
             os.environ.pop(field.env_var, None)
         else:
@@ -324,14 +350,25 @@ async def load_all_saved_credentials(db: AsyncSession) -> None:
     straight into real os.environ instead, matching how they're read.
     """
     result = await db.execute(select(PlatformCredentialRecord))
+    records = list(result.scalars().all())
     values_by_user: dict[str, dict[str, str]] = {}
-    for record in result.scalars().all():
+    desktop_store = (
+        _get_desktop_store() if records and get_runtime_profile().is_desktop else None
+    )
+    for record in records:
         platform = _PLATFORMS_BY_ID.get(record.platform_id)
         field = _field_for(platform, record.field_name) if platform is not None else None
         if platform is None or field is None:
             continue
         try:
-            value = decrypt_secret(record.encrypted_value)
+            if desktop_store is not None:
+                value = desktop_store.get(record.user_id, field.env_var)
+                if value is None:
+                    continue
+            elif record.encrypted_value is not None:
+                value = decrypt_secret(record.encrypted_value)
+            else:
+                continue
         except CredentialEncryptionError:
             # A rotated/missing key must not prevent app startup. The row
             # remains visible as saved in the Connections UI so a human can

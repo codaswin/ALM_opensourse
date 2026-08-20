@@ -275,7 +275,7 @@ async def test_research_job_skips_a_user_with_no_automation_queries_configured(
 async def test_engagement_job_deduplicates_notifications(db_session, monkeypatch: pytest.MonkeyPatch) -> None:
     import app.agents.engagement as engagement_module
     import app.tools.registry as registry_module
-    from app.models.automation import ProcessedNotificationRecord
+    from app.models.automation import ProcessedNotificationRecord, processed_notification_record_id
 
     user_id = await _add_active_user(db_session)
     await _mark_connected(db_session, user_id, {"composio", "linkedin"})
@@ -304,7 +304,10 @@ async def test_engagement_job_deduplicates_notifications(db_session, monkeypatch
     await scheduler._run_engagement_job()
     await scheduler._run_engagement_job()
 
-    record = await db_session.get(ProcessedNotificationRecord, "notification-1")
+    record = await db_session.get(
+        ProcessedNotificationRecord,
+        processed_notification_record_id(user_id, "notification-1"),
+    )
     assert handled == ["notification-1"]
     assert record is not None
     assert record.outcome == "submitted_for_approval"

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import JSON, Boolean, DateTime, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -19,6 +19,9 @@ class PostEpisode(Base):
     __tablename__ = "post_episodes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("dashboard_users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     entity_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     post_id: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
     content: Mapped[str] = mapped_column(String, nullable=False)
@@ -41,6 +44,9 @@ class ThreadEpisode(Base):
     __tablename__ = "thread_episodes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("dashboard_users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     entity_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     thread_id: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
     thread_type: Mapped[str] = mapped_column(String, nullable=False)  # "comment" | "dm"

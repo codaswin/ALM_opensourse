@@ -25,7 +25,7 @@ async def purge_stale_thread_content(db: AsyncSession, now: datetime | None = No
     cutoff = now - THREAD_CONTENT_RETENTION
     stale = await threads_with_stale_content(db, cutoff)
     for thread in stale:
-        await purge_thread_content(db, thread.thread_id, purged_at=now)
+        await purge_thread_content(db, thread.thread_id, purged_at=now, user_id=thread.user_id)
     return len(stale)
 
 
@@ -37,7 +37,7 @@ async def archive_old_posts(db: AsyncSession, now: datetime | None = None) -> in
     cutoff = now - POST_RETENTION
     stale = await posts_older_than(db, cutoff)
     for post in stale:
-        await archive_post(db, post.post_id)
+        await archive_post(db, post.post_id, user_id=post.user_id)
     return len(stale)
 
 

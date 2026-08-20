@@ -274,3 +274,17 @@ async def test_working_memory_approval_session(fake_redis):
     await working.set_approval_session("session-1", {"tool": "publish_post", "status": "pending"})
     session_state = await working.get_approval_session("session-1")
     assert session_state["status"] == "pending"
+
+
+async def test_working_memory_keys_are_isolated_per_user(fake_redis):
+    await working.set_current_draft("same-task", {"owner": "memory-test-user"})
+
+    other = tenancy_context.set_current_user_id("memory-test-user-other")
+    try:
+        assert await working.get_current_draft("same-task") is None
+        await working.set_current_draft("same-task", {"owner": "memory-test-user-other"})
+        assert await working.get_current_draft("same-task") == {"owner": "memory-test-user-other"}
+    finally:
+        tenancy_context.reset_current_user_id(other)
+
+    assert await working.get_current_draft("same-task") == {"owner": "memory-test-user"}

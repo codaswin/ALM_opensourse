@@ -1,5 +1,7 @@
 # INITIAL.md — Define Your Agent System
 
+> **Historical design input.** This file records the original web-first brief. The implemented architecture and the desktop/local-first migration documents under `docs/` are authoritative where they differ from this file.
+
 > Fill this out, then run `/generate-prp INITIAL.md`. This is the single source of truth for what the system does, who its runtime agents are, and what production guarantees it must meet.
 
 ---
@@ -10,7 +12,7 @@
 
 **Purpose:** Manages a professional's LinkedIn presence end-to-end — drafts on-brand posts, engages with the feed (likes/comments), drafts replies to comments and DMs on the user's behalf, tracks connection requests, and produces a weekly performance digest. It also researches AI/Agentic AI/tooling developments on X (Twitter) to keep post topics current. "Done" for a single interaction means: a draft (post, reply, or connection action) is generated, grounded in the user's brand voice, past content, and current research, and either auto-approved as safe informational output or queued for explicit human approval before anything touches LinkedIn publicly.
 
-**Type:** Hybrid (multi-agent crew + deterministic automation) — CrewAI-style role-based agents for content/engagement decisions, n8n for scheduled publish triggers and polling.
+**Type:** Hybrid (specialized runtime agents + deterministic automation). The implementation uses the project's typed Python harness and APScheduler; n8n and CrewAI are not runtime dependencies.
 
 ---
 
@@ -18,15 +20,15 @@
 
 | Layer | Choice |
 |-------|--------|
-| Orchestration | CrewAI (role-based crew: Strategist, Writer, Engagement, Analytics, Research — simpler fit than Autogen's conversational pattern for this workflow) |
+| Orchestration | Custom typed Python harness (Strategist, Writer, Engagement, Analytics, Research) |
 | Inference (primary) | Hosted API (Anthropic Claude) |
 | Inference (worker, optional) | Self-hosted (Hermes via vLLM) for low-risk bulk tasks: notification triage, engagement-priority scoring, X post triage/summarization |
 | RAG | FAISS, no KG layer for MVP |
 | Serving | FastAPI |
-| Memory store | Postgres (episodic + structured) + Redis (working/session) + FAISS (semantic) |
+| Memory store | Desktop: SQLite + FAISS; hosted server: Postgres + Redis + per-user FAISS |
 | LinkedIn integration | Composio (managed LinkedIn tool actions: post, delete, comment, message, connect — auth + rate-limit handling offloaded to Composio) |
 | X (Twitter) integration | Composio (read-only X search/timeline actions for research — same Composio account, separate connected-app scope; no posting/replying on X). Poll cadence defaults to daily, stored as a setting the user can change from the dashboard UI, not a hardcoded constant. |
-| Automation glue | n8n — polls Composio for new notifications/DMs on a schedule, triggers publish/delete jobs for approved actions |
+| Automation | APScheduler — runs research, engagement, retention, reflection, and approved-publish jobs |
 
 ---
 

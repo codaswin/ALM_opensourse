@@ -1,5 +1,4 @@
 import asyncio
-import fcntl
 import os
 import threading
 import uuid
@@ -12,11 +11,14 @@ from typing import Any
 
 import faiss
 import numpy as np
+import portalocker
 from app.config import settings
 from app.rag.chunking import Chunk, chunk_document_semantic, chunk_structured_1to1
 from app.tenancy.paths import user_vector_store_path
 
 EMBEDDING_DIM = settings.RAG_EMBEDDING_DIM
+STORE_FORMAT_VERSION = 1
+EMBEDDING_VERSION = "hashing-md5-bow-v1"
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
@@ -75,12 +77,8 @@ class VectorStore:
     @contextmanager
     def _locked(self):
         with _thread_lock(self.index_path):
-            with self.lock_file.open("a+b") as handle:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-                try:
-                    yield
-                finally:
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            with portalocker.Lock(str(self.lock_file), mode="a+b", timeout=60):
+                yield
 
     def _empty(self) -> tuple[faiss.Index, dict[int, dict[str, Any]], dict[str, list[int]]]:
         return faiss.IndexIDMap2(faiss.IndexFlatIP(self.dim)), {}, {}
@@ -88,6 +86,16 @@ class VectorStore:
     def _load_pair(self, index_file: Path, meta_file: Path):
         index = faiss.read_index(str(index_file))
         data = json.loads(meta_file.read_text())
+        format_version = int(data.get("format_version", 0))
+        if format_version not in (0, STORE_FORMAT_VERSION):
+            raise ValueError(
+                f"Unsupported RAG store format {format_version}; expected {STORE_FORMAT_VERSION}"
+            )
+        configured_dim = int(data.get("embedding_dim", self.dim))
+        if configured_dim != self.dim:
+            raise ValueError(
+                f"RAG metadata dimension {configured_dim} does not match configured dimension {self.dim}"
+            )
         if index.d != self.dim:
             raise ValueError(f"FAISS index dimension {index.d} does not match configured dimension {self.dim}")
         chunks = {int(k): v for k, v in data.get("chunks", {}).items()}
@@ -123,10 +131,13 @@ class VectorStore:
 
         faiss.write_index(self._index, str(index_tmp))
         meta_tmp.write_text(json.dumps({
+            "format_version": STORE_FORMAT_VERSION,
             "generation": generation,
+            "embedding": EMBEDDING_VERSION,
+            "embedding_dim": self.dim,
             "chunks": {str(k): v for k, v in self._chunks.items()},
             "doc_registry": self._registry,
-        }))
+        }), encoding="utf-8")
         self._fsync(index_tmp)
         self._fsync(meta_tmp)
         os.replace(index_tmp, index_final)
@@ -136,12 +147,32 @@ class VectorStore:
         self._fsync(current_tmp)
         os.replace(current_tmp, self.current_file)
 
-        for path in self.index_path.glob("index.*.faiss"):
-            if path != index_final:
-                path.unlink(missing_ok=True)
-        for path in self.index_path.glob("store.*.json"):
-            if path != meta_final:
-                path.unlink(missing_ok=True)
+        self._prune_generations(keep=2)
+
+    def _prune_generations(self, *, keep: int) -> None:
+        metadata = sorted(
+            self.index_path.glob("store.*.json"), key=lambda path: path.stat().st_mtime, reverse=True
+        )
+        for meta_path in metadata[keep:]:
+            generation = meta_path.name.removeprefix("store.").removesuffix(".json")
+            (self.index_path / f"index.{generation}.faiss").unlink(missing_ok=True)
+            meta_path.unlink(missing_ok=True)
+
+    def rebuild_from_metadata(self) -> int:
+        """Rebuild the FAISS index from the current generation's chunk metadata."""
+        with self._locked():
+            _old_index, chunks, registry = self._load()
+            rebuilt, _, _ = self._empty()
+            ordered = sorted(chunks.items())
+            if ordered:
+                vectors = embed_texts([chunk["text"] for _, chunk in ordered])
+                ids = np.array([vector_id for vector_id, _ in ordered], dtype="int64")
+                rebuilt.add_with_ids(vectors, ids)
+            self._index = rebuilt
+            self._chunks = chunks
+            self._registry = registry
+            self._save()
+            return len(chunks)
 
     def upsert(self, chunks: list[Chunk]) -> int:
         if not chunks:

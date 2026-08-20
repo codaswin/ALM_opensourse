@@ -4,17 +4,17 @@
 
 ---
 
-## Tech Stack (default — override in INITIAL.md if needed)
+## Implemented Tech Stack
 
-- **Orchestration:** Autogen (multi-agent) — CrewAI as an alternate backend where simpler role-based crews fit better
+- **Orchestration:** Custom typed Python agent harness with five specialized runtime agents
 - **Inference:** Hosted API (OpenAI/Anthropic/Claude) as primary — self-hosted open model (e.g. Hermes via vLLM/Ollama) as a worker/margin-protection layer for high-volume, low-risk tasks
 - **RAG:** FAISS for vector retrieval; optional Knowledge Graph layer (NetworkX for lightweight, Neo4j for production scale) for KG RAG
 - **Serving:** FastAPI
-- **Persistent memory:** Postgres (episodic + structured memory), Redis (working memory / session state), FAISS/Chroma (semantic long-term memory)
+- **Persistent memory:** Desktop mode uses app-data SQLite plus per-installation FAISS; server mode uses Postgres, Redis, and per-user FAISS
 - **Tracing / LLMOps:** structlog + a lightweight custom tracer (pluggable to Langfuse/Phoenix if the project wants a hosted option)
 - **Evals:** pytest-based harness + LLM-as-judge
-- **Automation glue (optional):** n8n for external trigger workflows
-- **Observability dashboard (optional):** React
+- **Scheduling:** APScheduler in both modes, with distributed coordination only in server mode
+- **Frontend:** React + Vite, embedded in the Tauri desktop shell or served as the web dashboard
 
 ---
 
@@ -32,11 +32,13 @@ project/
 │       ├── rag/               # ingestion + retrieval pipeline
 │       ├── context/           # context assembly + budget management
 │       ├── safety/            # guardrails, approval gates
-│       ├── evals/             # eval harness, golden datasets
 │       ├── llmops/            # model routing, tracing, cost tracking
 │       ├── learning/          # feedback capture, reflection
-│       └── tests/
+│       └── models/
+│   ├── evals/                 # eval harness, golden datasets
+│   └── tests/
 ├── frontend/                  # optional observability dashboard
+├── src-tauri/                 # native desktop shell and sidecar lifecycle
 ├── skills/            # 9 skill files — full runnable code
 ├── agents/            # build-time agent definitions (Claude Code agents)
 ├── .claude/commands/  # /setup-project, /generate-prp, /execute-prp
@@ -50,7 +52,7 @@ project/
 ## Non-Negotiable Rules
 
 1. **Every LLM call goes through the harness's `run_step()` — never call the LLM API directly from a tool or router.** This is what makes tracing, cost tracking, and retries possible.
-2. **Every tool call is logged with inputs, outputs, latency, and cost** before the loop continues.
+2. **Harness tool calls are recorded with inputs, outputs, latency, and cost** before the loop continues; direct registry executions emit structured status and latency logs.
 3. **Any action tagged `requires_approval` in a tool's schema blocks until a human approves it** — no exceptions, no "just this once."
 4. **Context assembly always respects the token budget** — silently exceeding it and truncating mid-response is a defect, not a fallback.
 5. **No agent ships without at least one eval suite passing** — a new capability without a golden-set test is not done.
@@ -79,7 +81,7 @@ async def run_step(state: AgentState) -> AgentState:
 - Silent context truncation — must summarize/compact deliberately (see `skills/CONTEXT.md`)
 - Autonomous execution of any `requires_approval` tool
 - Storing memory without a `source` and `confidence` field (untraceable memory is a liability)
-- Shipping a new agent capability without an eval added to `evals/`
+- Shipping a new agent capability without an eval added to `backend/evals/`
 - Hardcoded API keys/model names in code — env vars + `llmops/model_router.py`
 
 ---
@@ -87,9 +89,9 @@ async def run_step(state: AgentState) -> AgentState:
 ## Workflow
 
 ```
-1. Edit INITIAL.md (define the agent system, its agents, tools, memory, RAG sources)
-2. /generate-prp INITIAL.md
-3. /execute-prp PRPs/[name]-prp.md
+1. Update the relevant current specification or PRP.
+2. Implement against the runtime contracts in `backend/app/runtime.py`.
+3. Run the validation gates documented in the root README and the applicable PRP.
 ```
 
 ---

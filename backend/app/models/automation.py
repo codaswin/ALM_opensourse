@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.database import Base
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 
@@ -31,9 +31,17 @@ class ScheduledPostRecord(Base):
 
 class ProcessedNotificationRecord(Base):
     __tablename__ = "processed_notifications"
+    __table_args__ = (
+        UniqueConstraint("user_id", "notification_id", name="uq_processed_notification_owner"),
+    )
 
-    notification_id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    notification_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     # Stamped by learning/scheduler.py's per-user engagement job (Stage 3).
     user_id: Mapped[str] = mapped_column(ForeignKey("dashboard_users.id", ondelete="CASCADE"), nullable=False, index=True)
     outcome: Mapped[str] = mapped_column(String, nullable=False)
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+def processed_notification_record_id(user_id: str, notification_id: str) -> str:
+    return f"{user_id}:{notification_id}"

@@ -1,0 +1,23 @@
+[package]
+name = "ai-linkedin-manager"
+version = "0.1.0"
+description = "Human-controlled AI LinkedIn workspace"
+authors = ["Aswin"]
+license = "MIT"
+edition = "2021"
+
+[lib]
+name = "ai_linkedin_manager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+rand = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"

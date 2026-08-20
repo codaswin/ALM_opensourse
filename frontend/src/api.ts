@@ -10,12 +10,15 @@ import type {
   PlatformCredentialStatus,
   ReflectionResult,
   SettingValue,
+  SystemStatus,
   ToolExecutionResult,
   WorkflowResult,
   DashboardSession,
+  RuntimeBootstrap,
 } from "./types";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8010";
+let apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8010";
+let desktopLaunchToken: string | null = null;
 let csrfToken: string | null = null;
 // /auth/me issues a fresh CSRF token on every call (it doubles as the
 // refresh mechanism after a page reload wipes the module-level csrfToken
@@ -30,27 +33,66 @@ let sessionCheckInFlight: Promise<DashboardSession> | null = null;
 
 export class ApiError extends Error {
   status: number;
+  code: string | null;
+  retryable: boolean;
+  action: string | null;
+  returnRoute: string | null;
+  correlationId: string | null;
 
-  constructor(status: number, detail: string) {
+  constructor(status: number, detail: string, body?: ApiErrorBody) {
     super(detail);
     this.status = status;
+    this.code = body?.code ?? null;
+    this.retryable = body?.retryable ?? status >= 500;
+    this.action = body?.action ?? null;
+    this.returnRoute = body?.return_route ?? null;
+    this.correlationId = body?.correlation_id ?? null;
   }
+}
+
+interface TauriRuntimeConnection {
+  origin: string;
+  launchToken: string;
+}
+
+export function isDesktopShell(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+export async function initializeApiTransport(): Promise<void> {
+  if (!isDesktopShell()) return;
+  const { invoke } = await import("@tauri-apps/api/core");
+  const deadline = Date.now() + 45_000;
+  let lastError: unknown = null;
+  while (Date.now() < deadline) {
+    try {
+      const connection = await invoke<TauriRuntimeConnection>("runtime_connection");
+      apiBaseUrl = connection.origin;
+      desktopLaunchToken = connection.launchToken;
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
+    }
+  }
+  throw new Error("The local backend did not become ready: " + String(lastError ?? "timeout"));
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? "GET").toUpperCase();
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(apiBaseUrl + path, {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...(desktopLaunchToken ? { Authorization: "Bearer " + desktopLaunchToken } : {}),
       ...(csrfToken && !["GET", "HEAD", "OPTIONS"].includes(method) ? { "X-CSRF-Token": csrfToken } : {}),
       ...init?.headers,
     },
   });
   if (!response.ok) {
     const body = (await response.json().catch(() => ({ detail: response.statusText }))) as ApiErrorBody;
-    throw new ApiError(response.status, body.detail ?? `Request to ${path} failed with ${response.status}`);
+    throw new ApiError(response.status, body.detail ?? "Request to " + path + " failed with " + response.status, body);
   }
   if (response.status === 204) {
     return undefined as T;
@@ -95,6 +137,8 @@ export const logout = async (): Promise<void> => {
 
 export const getHealth = (): Promise<{ status: string }> => request("/health");
 
+export const getRuntimeBootstrap = (): Promise<RuntimeBootstrap> => request("/runtime/bootstrap");
+
 // -- Settings -------------------------------------------------------------
 
 export const getSetting = (key: string): Promise<SettingValue> => request(`/settings/${encodeURIComponent(key)}`);
@@ -104,6 +148,14 @@ export const updateSetting = (key: string, value: string): Promise<SettingValue>
     method: "PUT",
     body: JSON.stringify({ value }),
   });
+
+export const getSystemStatus = (): Promise<SystemStatus> => request("/system/status");
+
+export const pauseSystem = (reason: string): Promise<SystemStatus> =>
+  request("/system/pause", { method: "POST", body: JSON.stringify({ reason }) });
+
+export const resumeSystem = (): Promise<SystemStatus> =>
+  request("/system/resume", { method: "POST", body: JSON.stringify({}) });
 
 // -- Approval queue -------------------------------------------------------
 

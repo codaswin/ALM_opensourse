@@ -1,12 +1,12 @@
-import { useEffect, useState, type ComponentType, type FormEvent } from "react";
+import { Component, useEffect, useState, type ComponentType, type FormEvent, type ReactNode } from "react";
 import { Bot, BrainCircuit, ChevronRight, CircleDollarSign, Command, Eye, EyeOff, LockKeyhole, LogOut, Menu, MessageSquareText, Moon, Network, Settings2, ShieldCheck, Sparkles, Sun, Users, UserRound, Workflow, X } from "lucide-react";
 import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import "./App.css";
-import { ApiError, getCurrentSession, login, logout } from "./api";
+import { ApiError, getCurrentSession, getRuntimeBootstrap, initializeApiTransport, login, logout } from "./api";
 import { ActivityBanner } from "./components/ActivityBanner";
 import { ThemeProvider } from "./ThemeProvider";
 import { useTheme } from "./themeStore";
-import type { DashboardSession } from "./types";
+import type { DashboardSession, RuntimeBootstrap } from "./types";
 import { ApprovalQueueView } from "./views/ApprovalQueueView";
 import { BrandVoiceView } from "./views/BrandVoiceView";
 import { ConnectionsView } from "./views/ConnectionsView";
@@ -32,6 +32,18 @@ const TABS = [
   { id: "users", label: "Users", description: "Invite teammates", icon: Users, group: "System", adminOnly: true, render: () => <UsersView /> },
 ] as const satisfies readonly { id: string; label: string; description: string; icon: NavIcon; group: string; adminOnly: boolean; render: (session: DashboardSession) => React.ReactNode }[];
 const NAV_GROUPS = ["Workspace", "Intelligence", "System"] as const;
+const SERVER_RUNTIME_FALLBACK: RuntimeBootstrap = {
+  mode: "server",
+  user: { id: "", username: "", role: "viewer" },
+  capabilities: {
+    requires_login: true,
+    supports_multiple_users: true,
+    supports_user_administration: true,
+    uses_distributed_scheduler_coordination: true,
+    runs_scheduler_only_while_app_is_open: false,
+  },
+  api_version: "unknown",
+};
 
 function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
@@ -115,10 +127,10 @@ function LoginScreen({ onAuthenticated }: { onAuthenticated: (session: Dashboard
   </main>;
 }
 
-function Dashboard({ session, onSignedOut }: { session: DashboardSession; onSignedOut: () => void }) {
+function Dashboard({ session, runtime, onSignedOut }: { session: DashboardSession; runtime: RuntimeBootstrap; onSignedOut: () => void }) {
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]["id"]>("workflows");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const visibleTabs = TABS.filter((tab) => !tab.adminOnly || session.user.role === "admin");
+  const visibleTabs = TABS.filter((tab) => !tab.adminOnly || (runtime.capabilities.supports_user_administration && session.user.role === "admin"));
   const active = visibleTabs.find((tab) => tab.id === activeTab) ?? visibleTabs[0];
   const ActiveIcon = active.icon;
 
@@ -170,7 +182,7 @@ function Dashboard({ session, onSignedOut }: { session: DashboardSession; onSign
         </nav>
         <div className="sidebar-footer">
           <div className="sidebar-user"><span className="sidebar-user-avatar"><UserRound size={16} /></span><span className="sidebar-user-details"><strong>{session.user.username}</strong><small>{session.user.role}</small></span></div>
-          <button type="button" className="theme-toggle" onClick={() => void handleLogout()} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button>
+          {runtime.capabilities.requires_login && <button type="button" className="theme-toggle" onClick={() => void handleLogout()} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button>}
           <ThemeToggle />
         </div>
       </aside>
@@ -202,26 +214,70 @@ function Dashboard({ session, onSignedOut }: { session: DashboardSession; onSign
   </div>;
 }
 
+function DesktopWelcome({ onContinue }: { onContinue: () => void }) {
+  return <main className="login-shell"><section className="login-panel">
+    <div className="login-brand"><span className="sidebar-brand-mark"><Bot size={22} /></span><span><strong>AI LinkedIn</strong><small>Desktop Manager</small></span></div>
+    <div className="login-heading"><span><ShieldCheck size={19} /></span><div><h1>Your private workspace is ready</h1><p>Data stays in this installation and credentials use your operating system's secure store.</p></div></div>
+    <p>Scheduled work runs while this application is open. Every publish, reply, delete, schedule, and connection request still requires human approval.</p>
+    <button className="login-submit" type="button" onClick={onContinue}>Open workspace</button>
+  </section></main>;
+}
+
+function StartupFailure({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return <main className="login-shell"><section className="login-panel" role="alert">
+    <div className="login-heading"><span><ShieldCheck size={19} /></span><div><h1>Local service needs attention</h1><p>{message}</p></div></div>
+    <button className="login-submit" type="button" onClick={onRetry}>Retry startup</button>
+  </section></main>;
+}
+
+class AppErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  render() {
+    if (this.state.error) return <StartupFailure message={this.state.error.message} onRetry={() => window.location.reload()} />;
+    return this.props.children;
+  }
+}
+
 function AuthenticatedApp() {
   const [session, setSession] = useState<DashboardSession | null>(null);
+  const [runtime, setRuntime] = useState<RuntimeBootstrap | null>(null);
   const [checking, setChecking] = useState(true);
+  const [startupError, setStartupError] = useState<string | null>(null);
+  const [startupAttempt, setStartupAttempt] = useState(0);
+  const [desktopOnboarded, setDesktopOnboarded] = useState(() => localStorage.getItem("desktop-onboarding-complete-v1") === "true");
   // Signed-out visitors land on the marketing page first; returning users
   // with a live session skip straight past it into the dashboard.
   const [pastLanding, setPastLanding] = useState(false);
 
   useEffect(() => {
-    getCurrentSession()
+    setChecking(true);
+    setStartupError(null);
+    initializeApiTransport()
+      .then(() => getRuntimeBootstrap())
+      .then((bootstrap) => { setRuntime(bootstrap); return getCurrentSession(); })
       .then(setSession)
-      .catch((error: unknown) => { if (!(error instanceof ApiError) || error.status !== 401) console.error(error); })
+      .catch((error: unknown) => {
+        if (error instanceof ApiError && error.status === 401) {
+          setRuntime(SERVER_RUNTIME_FALLBACK);
+          return;
+        }
+        console.error(error);
+        setStartupError(error instanceof Error ? error.message : "Startup failed");
+      })
       .finally(() => setChecking(false));
-  }, []);
+  }, [startupAttempt]);
 
-  if (checking) return <div className="auth-loading"><span className="auth-spinner" /><span>Checking session</span></div>;
-  if (session) return <Dashboard session={session} onSignedOut={() => { setSession(null); setPastLanding(false); }} />;
+  if (checking) return <div className="auth-loading"><span className="auth-spinner" /><span>Starting secure workspace</span></div>;
+  if (startupError) return <StartupFailure message={startupError} onRetry={() => setStartupAttempt((value) => value + 1)} />;
+  if (session && runtime) {
+    if (runtime.mode === "desktop" && !desktopOnboarded) return <DesktopWelcome onContinue={() => { localStorage.setItem("desktop-onboarding-complete-v1", "true"); setDesktopOnboarded(true); }} />;
+    return <Dashboard session={session} runtime={runtime} onSignedOut={() => { setSession(null); setPastLanding(false); }} />;
+  }
   if (!pastLanding) return <LandingPage onEnter={() => setPastLanding(true)} />;
   return <LoginScreen onAuthenticated={setSession} />;
 }
 
 export default function App() {
-  return <MotionConfig reducedMotion="user"><ThemeProvider><AuthenticatedApp /></ThemeProvider></MotionConfig>;
+  return <AppErrorBoundary><MotionConfig reducedMotion="user"><ThemeProvider><AuthenticatedApp /></ThemeProvider></MotionConfig></AppErrorBoundary>;
 }

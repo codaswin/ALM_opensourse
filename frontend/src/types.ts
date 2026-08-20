@@ -9,7 +9,22 @@ export type DashboardRole = "viewer" | "operator" | "admin";
 
 export interface DashboardSession {
   user: { id: string; username: string; role: DashboardRole };
-  csrf_token: string;
+  csrf_token: string | null;
+}
+
+export interface RuntimeCapabilities {
+  requires_login: boolean;
+  supports_multiple_users: boolean;
+  supports_user_administration: boolean;
+  uses_distributed_scheduler_coordination: boolean;
+  runs_scheduler_only_while_app_is_open: boolean;
+}
+
+export interface RuntimeBootstrap {
+  mode: "server" | "desktop";
+  user: DashboardSession["user"];
+  capabilities: RuntimeCapabilities;
+  api_version: string;
 }
 
 export interface ApprovalRequest {
@@ -51,6 +66,13 @@ export interface SettingValue {
   updated_at?: string;
 }
 
+export interface SystemStatus {
+  paused: boolean;
+  reason: string | null;
+  paused_by: string | null;
+  paused_at: string | null;
+}
+
 export interface CostSummary {
   today_usd: number;
   budget_usd: number;
@@ -66,6 +88,11 @@ export interface ReflectionResult {
 
 export interface ApiErrorBody {
   detail: string;
+  code?: string;
+  retryable?: boolean;
+  action?: string;
+  return_route?: string;
+  correlation_id?: string;
 }
 
 // GET /activity returns null when no workflow is currently running —

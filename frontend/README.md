@@ -1,6 +1,6 @@
 # AI LinkedIn Manager — Dashboard
 
-React + Vite + TypeScript frontend for the [AI LinkedIn Manager](../README.md) backend. Four views, each a thin client over one existing FastAPI resource — no state management library, no component framework, no routing library. The app is small enough that `useState` + four view components cover it.
+React + Vite + TypeScript UI for the [AI LinkedIn Manager](../README.md). The same build runs inside the Tauri desktop shell and as the optional web/VPS dashboard.
 
 | View | Backend resource | What it does |
 |------|-------------------|----------------|
@@ -8,6 +8,10 @@ React + Vite + TypeScript frontend for the [AI LinkedIn Manager](../README.md) b
 | Self-Learning | `GET/POST /learning/proposals/*`, `POST /learning/reflect` | Review reflection-job proposals, trigger an on-demand reflection run |
 | Settings | `GET/PUT /settings/{key}` | View/edit agent settings (e.g. `research_agent.poll_interval`) |
 | Cost | `GET /cost` | Today's LLM spend vs. the daily cap |
+| Workflows | `POST /workflows/*` | Run research, content, analytics, and engagement workflows |
+| Connections | `GET/POST /credentials/*` | Manage integration credentials and connected accounts |
+| Brand Voice | `GET/POST /brand-voice/*` | Maintain writing-style profiles |
+| Users (server only) | `GET/POST /admin/users` | Administer hosted workspace accounts |
 
 ## Run locally
 
@@ -17,7 +21,7 @@ cp .env.example .env   # only needed if the backend isn't on http://localhost:80
 npm run dev
 ```
 
-The backend must be running separately (`uvicorn app.main:app --reload` from `backend/`) and must allow this dev server's origin via `CORS_ALLOWED_ORIGINS` (defaults already cover `http://localhost:5173`).
+For browser development, the backend runs separately (`uvicorn app.main:app --reload` from `backend/`) and must allow this dev server's origin via `CORS_ALLOWED_ORIGINS`. The packaged desktop app starts and authenticates its local backend sidecar automatically.
 
 ## Build
 
@@ -28,6 +32,6 @@ npm run preview    # serve the production build locally
 
 ## Notes
 
-- **`decided_by` identity**: every approve/reject call needs an actor string, attached server-side to the audit trail. Set via the "Acting as" field in the header — persisted to `localStorage`, defaults to `human:dashboard`.
+- **Identity**: hosted mode uses the authenticated workspace account; desktop mode uses a stable local-owner identity created for the installation. Approval audit records derive the actor server-side.
 - **`approveApproval` vs `rejectApproval` response shapes differ** (`src/types.ts`'s `ToolExecutionResult` vs `ApprovalRequest`) — that's a real asymmetry in `backend/app/main.py`, not a frontend bug: approving actually executes the gated tool and returns its raw result; rejecting just updates the approval record.
 - No settings-listing endpoint exists (`memory/settings.py` is a key-by-key store) — the Settings view shows the one known seeded key and offers a lookup box for any other key by name, rather than trying to enumerate all settings.

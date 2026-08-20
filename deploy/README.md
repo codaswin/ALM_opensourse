@@ -1,6 +1,6 @@
 # Production VPS deployment
 
-This stack is intended for a private, single-workspace testing deployment on a VPS. It publishes only Caddy on HTTP/HTTPS. The frontend, FastAPI backend, PostgreSQL, Redis, and backup service remain on Docker networks and have no host port bindings.
+This optional stack is the hosted, multi-user deployment mode for a private VPS. It publishes only Caddy on HTTP/HTTPS. The frontend, FastAPI backend, PostgreSQL, Redis, and backup service remain on Docker networks and have no host port bindings.
 
 ```text
 Internet -> Caddy :80/:443 -> frontend:80

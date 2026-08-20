@@ -147,7 +147,7 @@ async def _run_engagement_job_for_user(user_id: str) -> None:
     from app.agents.engagement import handle_notification
     from app.database import get_session_factory
     from app.llmops.model_router import route_and_call
-    from app.models.automation import ProcessedNotificationRecord
+    from app.models.automation import ProcessedNotificationRecord, processed_notification_record_id
     from app.tools.registry import execute_tool
 
     result = await execute_tool(
@@ -166,9 +166,17 @@ async def _run_engagement_job_for_user(user_id: str) -> None:
         if not notification_id or notification.get("type") not in {"comment", "dm", "connection_request"}:
             continue
         async with factory() as db:
-            if await db.get(ProcessedNotificationRecord, notification_id) is not None:
+            record_id = processed_notification_record_id(user_id, notification_id)
+            if await db.get(ProcessedNotificationRecord, record_id) is not None:
                 continue
-            db.add(ProcessedNotificationRecord(notification_id=notification_id, user_id=user_id, outcome="processing"))
+            db.add(
+                ProcessedNotificationRecord(
+                    id=record_id,
+                    notification_id=notification_id,
+                    user_id=user_id,
+                    outcome="processing",
+                )
+            )
             try:
                 await db.commit()
             except IntegrityError:
@@ -176,14 +184,14 @@ async def _run_engagement_job_for_user(user_id: str) -> None:
                 continue
             try:
                 outcome = await handle_notification(notification, route_and_call, db=db)
-                record = await db.get(ProcessedNotificationRecord, notification_id)
+                record = await db.get(ProcessedNotificationRecord, record_id)
                 if record is not None:
                     record.outcome = str(outcome.get("status", "completed"))
                 await db.commit()
                 processed += 1
             except Exception:
                 await db.rollback()
-                record = await db.get(ProcessedNotificationRecord, notification_id)
+                record = await db.get(ProcessedNotificationRecord, record_id)
                 if record is not None:
                     await db.delete(record)
                     await db.commit()

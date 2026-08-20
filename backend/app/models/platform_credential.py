@@ -28,6 +28,8 @@ class PlatformCredentialRecord(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("dashboard_users.id", ondelete="CASCADE"), nullable=False, index=True)
     platform_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     field_name: Mapped[str] = mapped_column(String, nullable=False)
-    encrypted_value: Mapped[str] = mapped_column(String, nullable=False)
+    # Desktop rows hold metadata only; the value lives in the OS keyring.
+    # Hosted rows continue to contain a Fernet ciphertext.
+    encrypted_value: Mapped[str | None] = mapped_column(String, nullable=True)
     masked_preview: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

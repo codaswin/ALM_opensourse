@@ -38,7 +38,7 @@ async def build_report(db: AsyncSession, args: GenerateAnalyticsReportArgs) -> d
         .where(
             PostEpisode.published_at >= start_at,
             PostEpisode.published_at < end_at,
-            PostEpisode.entity_id == get_current_user_id(),
+            PostEpisode.user_id == get_current_user_id(),
         )
         .order_by(PostEpisode.published_at.desc())
     )

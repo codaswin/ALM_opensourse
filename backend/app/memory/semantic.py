@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.semantic import SemanticMemoryRecord
+from app.tenancy.context import get_current_user_id
+from app.tenancy.paths import user_vector_store_path
 
 _EMBEDDING_DIM = settings.RAG_EMBEDDING_DIM  # shared with rag-agent's embedder so vectors are dimension-compatible
 _index_cache: dict[str, faiss.Index] = {}
@@ -23,7 +25,7 @@ _DEFAULT_INDEX_FILENAME = "semantic_memory.faiss"
 
 
 def _default_index_path() -> str:
-    return os.path.join(settings.VECTOR_DB_PATH, _DEFAULT_INDEX_FILENAME)
+    return os.path.join(user_vector_store_path(), _DEFAULT_INDEX_FILENAME)
 
 
 class MissingProvenanceError(ValueError):
@@ -66,7 +68,11 @@ def _save_index(index_path: str, index: faiss.Index) -> None:
 
 
 async def _next_vector_id(db: AsyncSession) -> int:
-    result = await db.execute(select(func.max(SemanticMemoryRecord.vector_id)))
+    result = await db.execute(
+        select(func.max(SemanticMemoryRecord.vector_id)).where(
+            SemanticMemoryRecord.user_id == get_current_user_id()
+        )
+    )
     current_max = result.scalar()
     return 0 if current_max is None else current_max + 1
 
@@ -104,6 +110,7 @@ async def write(
     await asyncio.to_thread(_add)
 
     record = SemanticMemoryRecord(
+        user_id=get_current_user_id(),
         vector_id=next_id,
         entity_id=entity_id,
         category=category,
@@ -145,6 +152,7 @@ async def search(
         return []
 
     stmt = select(SemanticMemoryRecord).where(
+        SemanticMemoryRecord.user_id == get_current_user_id(),
         SemanticMemoryRecord.vector_id.in_(candidate_ids),
         SemanticMemoryRecord.entity_id == entity_id,
         SemanticMemoryRecord.confidence >= min_confidence,

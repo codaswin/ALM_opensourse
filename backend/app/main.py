@@ -20,6 +20,8 @@ rather than per line.
 from __future__ import annotations
 
 import os
+import asyncio
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
@@ -27,7 +29,11 @@ from typing import Any, Literal
 
 import structlog
 from app import activity as activity_module
+from app.application_paths import ApplicationPaths
 from app.database import get_session, get_session_factory, init_models
+from app.desktop_auth import authenticate_desktop_request
+from app.desktop_migrations import run_desktop_migrations
+from app.config import settings
 from app.learning import proposal_review
 from app.learning.proposal_review import (
     ProposalAlreadyDecidedError,
@@ -39,8 +45,9 @@ from app.llmops.hermes_client import HermesCallError
 from app.llmops.openai_client import OpenAIConfigError
 from app.memory import brand_voice as brand_voice_memory
 from app.memory import platform_credentials
+from app.local_identity import ensure_local_owner, load_or_create_local_identity
 from app.memory.settings import get_setting, set_setting
-from app.safety import approval_gate
+from app.safety import approval_gate, kill_switch
 from app.safety.approval_gate import (
     ApprovalRequestAlreadyDecidedError,
     ApprovalRequestNotFoundError,
@@ -62,6 +69,7 @@ from app.safety.api_auth import (
     set_session_cookie,
 )
 from app.safety.secrets import CredentialEncryptionError
+from app.runtime import get_runtime_profile
 from app.tenancy.context import reset_current_user_id, set_current_user_id
 from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -71,6 +79,19 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = structlog.get_logger(__name__)
+
+
+def _recovery_error(
+    *, code: str, message: str, retryable: bool, action: str
+) -> dict[str, Any]:
+    return {
+        "detail": message,
+        "code": code,
+        "retryable": retryable,
+        "action": action,
+        "return_route": "/workflows",
+        "correlation_id": str(uuid.uuid4()),
+    }
 
 
 def _production_mode() -> bool:
@@ -88,15 +109,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from app.tools.registry import _import_all_tools
 
     _import_all_tools()
-    if os.environ.get("AUTO_CREATE_SCHEMA", "").lower() in {"1", "true", "yes"}:
+    profile = get_runtime_profile()
+    if profile.is_desktop:
+        paths = ApplicationPaths.for_desktop(profile)
+        paths.ensure_exists()
+        await asyncio.to_thread(run_desktop_migrations, paths, settings.DATABASE_URL)
+    elif os.environ.get("AUTO_CREATE_SCHEMA", "").lower() in {"1", "true", "yes"}:
         await init_models()
     # Replay anything saved through the Connections page back into
     # os.environ — the DB row is the durable copy, but every credential
     # consumer (anthropic_client, search_reddit, ...) still just reads
     # os.environ, so a restart needs this to not lose what was configured.
     async with get_session_factory()() as session:
+        if profile.is_desktop:
+            identity = load_or_create_local_identity(ApplicationPaths.for_desktop(profile))
+            await ensure_local_owner(session, identity)
+            app.state.desktop_identity = identity
+        else:
+            await ensure_bootstrap_admin(session)
         await platform_credentials.load_all_saved_credentials(session)
-        await ensure_bootstrap_admin(session)
     start_scheduler()
     logger.info("app_startup_complete")
     yield
@@ -119,7 +150,11 @@ async def _dashboard_session_guard(request: Request, call_next):
     if request.method.upper() == "OPTIONS" or is_public_path(request.url.path):
         return await call_next(request)
     try:
-        user = await authenticate_request(request)
+        profile = get_runtime_profile()
+        if profile.is_desktop:
+            user = authenticate_desktop_request(request, request.app.state.desktop_identity)
+        else:
+            user = await authenticate_request(request)
         authorize_request(request, user)
     except HTTPException as exc:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
@@ -150,7 +185,11 @@ async def _dashboard_session_guard(request: Request, call_next):
 # then reports a CORS failure instead of a real 401, and the login page
 # itself couldn't call /auth/login. Registering CORS last makes it the
 # outermost layer so it can decorate every response, including the guard's.
-_DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
+_DEFAULT_CORS_ORIGINS = (
+    "tauri://localhost,http://tauri.localhost,http://localhost:5173,http://127.0.0.1:5173"
+    if get_runtime_profile().is_desktop
+    else "http://localhost:5173,http://127.0.0.1:5173"
+)
 _cors_origins = [
     origin.strip()
     for origin in os.environ.get("CORS_ALLOWED_ORIGINS", _DEFAULT_CORS_ORIGINS).split(",")
@@ -171,22 +210,54 @@ app.add_middleware(
 # dependency that isn't set up," not a server bug.
 @app.exception_handler(AnthropicConfigError)
 async def _anthropic_config_error_handler(request: Request, exc: AnthropicConfigError) -> JSONResponse:
-    return JSONResponse(status_code=503, content={"detail": f"Anthropic client not available: {exc}"})
+    return JSONResponse(
+        status_code=503,
+        content=_recovery_error(
+            code="credential.anthropic_unavailable",
+            message=f"Anthropic client not available: {exc}",
+            retryable=False,
+            action="open_connections",
+        ),
+    )
 
 
 @app.exception_handler(HermesCallError)
 async def _hermes_call_error_handler(request: Request, exc: HermesCallError) -> JSONResponse:
-    return JSONResponse(status_code=503, content={"detail": f"Hermes/vLLM worker not available: {exc}"})
+    return JSONResponse(
+        status_code=503,
+        content=_recovery_error(
+            code="dependency.hermes_unavailable",
+            message=f"Hermes/vLLM worker not available: {exc}",
+            retryable=True,
+            action="retry",
+        ),
+    )
 
 
 @app.exception_handler(OpenAIConfigError)
 async def _openai_config_error_handler(request: Request, exc: OpenAIConfigError) -> JSONResponse:
-    return JSONResponse(status_code=503, content={"detail": f"OpenAI client not available: {exc}"})
+    return JSONResponse(
+        status_code=503,
+        content=_recovery_error(
+            code="credential.openai_unavailable",
+            message=f"OpenAI client not available: {exc}",
+            retryable=False,
+            action="open_connections",
+        ),
+    )
 
 
 @app.exception_handler(CredentialEncryptionError)
 async def _credential_encryption_error_handler(request: Request, exc: CredentialEncryptionError) -> JSONResponse:
-    return JSONResponse(status_code=503, content={"detail": str(exc)})
+    return JSONResponse(
+        status_code=503,
+        content=_recovery_error(
+            code="credential.encryption_unavailable",
+            message=str(exc),
+            retryable=False,
+            action="open_connections",
+        ),
+    )
 
 
 async def get_db() -> AsyncIterator[AsyncSession]:
@@ -204,6 +275,8 @@ class LoginBody(BaseModel):
 
 @app.post("/auth/login")
 async def login(body: LoginBody, request: Request, response: Response) -> dict[str, Any]:
+    if get_runtime_profile().is_desktop:
+        raise HTTPException(status_code=404, detail="Password login is not available in desktop mode")
     async with get_session_factory()() as db:
         user, session_token, csrf_token = await authenticate_credentials(
             db,
@@ -218,12 +291,16 @@ async def login(body: LoginBody, request: Request, response: Response) -> dict[s
 @app.get("/auth/me")
 async def auth_me(request: Request) -> dict[str, Any]:
     user = current_user(request)
+    if get_runtime_profile().is_desktop:
+        return {"user": {"id": user.id, "username": user.username, "role": user.role}, "csrf_token": None}
     csrf_token = await rotate_csrf_token(request)
     return {"user": {"id": user.id, "username": user.username, "role": user.role}, "csrf_token": csrf_token}
 
 
 @app.post("/auth/logout")
 async def logout(request: Request, response: Response) -> dict[str, bool]:
+    if get_runtime_profile().is_desktop:
+        return {"logged_out": True}
     await revoke_session(request)
     clear_session_cookie(response)
     return {"logged_out": True}
@@ -289,6 +366,28 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/runtime/bootstrap")
+async def runtime_bootstrap(request: Request) -> dict[str, Any]:
+    profile = get_runtime_profile()
+    user = current_user(request)
+    return {
+        "mode": profile.mode.value,
+        "user": {"id": user.id, "username": user.username, "role": user.role},
+        "capabilities": {
+            "requires_login": profile.capabilities.requires_login,
+            "supports_multiple_users": profile.capabilities.supports_multiple_users,
+            "supports_user_administration": profile.capabilities.supports_user_administration,
+            "uses_distributed_scheduler_coordination": (
+                profile.capabilities.uses_distributed_scheduler_coordination
+            ),
+            "runs_scheduler_only_while_app_is_open": (
+                profile.capabilities.runs_scheduler_only_while_app_is_open
+            ),
+        },
+        "api_version": app.version,
+    }
+
+
 @app.get("/activity")
 async def read_activity() -> dict[str, Any] | None:
     """Polled by the dashboard's ActivityBanner every ~1.2s — None means idle."""
@@ -302,6 +401,30 @@ async def read_activity() -> dict[str, Any] | None:
 
 class SettingUpdate(BaseModel):
     value: str
+
+
+class PauseSystemBody(BaseModel):
+    reason: str
+
+
+@app.get("/system/status")
+async def system_status() -> dict[str, Any]:
+    return kill_switch.get_pause_info()
+
+
+@app.post("/system/pause")
+async def pause_system(body: PauseSystemBody, request: Request) -> dict[str, Any]:
+    reason = body.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=422, detail="A pause reason is required")
+    kill_switch.pause_system(reason=reason, paused_by=current_user(request).username)
+    return kill_switch.get_pause_info()
+
+
+@app.post("/system/resume")
+async def resume_system(request: Request) -> dict[str, Any]:
+    kill_switch.resume_system(resumed_by=current_user(request).username)
+    return kill_switch.get_pause_info()
 
 
 @app.get("/settings/{key}")

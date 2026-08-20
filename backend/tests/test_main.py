@@ -133,6 +133,21 @@ async def test_health(client: AsyncClient) -> None:
     assert response.json() == {"status": "ok"}
 
 
+async def test_authenticated_operator_can_pause_and_resume_system(client: AsyncClient) -> None:
+    status = await client.get("/system/status")
+    assert status.status_code == 200
+    assert status.json()["paused"] is False
+
+    paused = await client.post("/system/pause", json={"reason": "operator incident drill"})
+    assert paused.status_code == 200
+    assert paused.json()["paused"] is True
+    assert paused.json()["reason"] == "operator incident drill"
+
+    resumed = await client.post("/system/resume", json={})
+    assert resumed.status_code == 200
+    assert resumed.json()["paused"] is False
+
+
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------

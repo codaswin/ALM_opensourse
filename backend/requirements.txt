@@ -3,6 +3,7 @@ pydantic==2.13.4
 structlog==26.1.0
 python-dotenv==1.2.2
 cryptography==50.0.0
+keyring==25.7.0
 
 # Harness / agents / LLM integration
 composio==0.19.0
@@ -10,6 +11,7 @@ composio==0.19.0
 # RAG / memory
 faiss-cpu==1.15.0
 numpy==2.5.2
+portalocker==3.2.0
 
 # Persistence
 SQLAlchemy==2.0.52
@@ -48,3 +50,4 @@ alembic==1.17.2
 ruff==0.14.8
 
 mypy==1.19.0
+pyinstaller==6.16.0
