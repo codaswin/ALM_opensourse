@@ -1,0 +1,77 @@
+name: release
+
+# Builds a Linux desktop package and publishes it as a GitHub Release
+# whenever a "v*" tag is pushed. Uses the Actions-provided GITHUB_TOKEN —
+# no personal access token or `gh` login is required to run this.
+#
+# This produces plain, unsigned installers (AppImage/.deb/.rpm). The Tauri
+# auto-updater plugin is disabled in src-tauri/src/lib.rs (see that file
+# for why), so there is no signed update manifest involved — this workflow
+# only uploads the installers themselves, which is safe to do unsigned for
+# a manual first-run install. See docs/releasing.md for what remains
+# manual (code signing, notarization, Windows/macOS builds).
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux Tauri build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libgtk-3-dev \
+            libsoup-3.0-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Install backend build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pyinstaller
+
+      - name: Version consistency
+        run: python scripts/check-version.py
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build frozen backend sidecar
+        run: bash scripts/build-sidecar.sh
+
+      - name: Build Tauri bundles (AppImage, deb, rpm)
+        working-directory: src-tauri
+        run: npx @tauri-apps/cli@2 build
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: AI LinkedIn Manager ${{ github.ref_name }}
+          body: |
+            Unsigned Linux desktop build — AppImage, .deb, and .rpm packages.
+            See the README for install instructions and what "unsigned" means in practice.
+          files: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm

@@ -58,7 +58,17 @@ Every one of those five agents shares one rule without exception: **no agent hol
 
 ## Install
 
-Signed, downloadable installers aren't published yet, so this builds the desktop app from source on your own machine.
+### Option A — one-line install (Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/codaswin/ALM_opensourse/main/install.sh | bash
+```
+
+Downloads the latest release and installs it with your system's package manager (`.deb` via `apt`, `.rpm` via `dnf`, or a standalone `.AppImage` as a fallback) — no cloning, no build tools, nothing else required. Read the script before piping it to `bash` if you'd rather not blindly trust a curl-pipe: [`install.sh`](install.sh).
+
+This is an early, **unsigned** build — there's no Apple/Microsoft code-signing certificate behind it (those cost money and aren't set up yet), and no signed auto-update mechanism, so the app won't self-update; check the [Releases page](https://github.com/codaswin/ALM_opensourse/releases) for new versions. Windows and macOS installers aren't published yet — see Option B below to build for those platforms yourself in the meantime.
+
+### Option B — build from source (all platforms)
 
 1. **Clone the repository**
 
