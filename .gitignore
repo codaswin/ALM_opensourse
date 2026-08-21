@@ -58,6 +58,8 @@ htmlcov/
 .eggs/
 build/
 dist/
+pip-log.txt
+pip-delete-this-directory.txt
 
 # Native sidecars are reproducible release artifacts, not source.
 src-tauri/binaries/ai-linkedin-backend-*
@@ -127,12 +129,29 @@ logs/
 # Antigravity/local IDE data
 .antigravity/
 
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# VS Code "Local History" extension
+.history/
+
 
 # ============================================================
 # OS FILES
 # ============================================================
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
 Thumbs.db
+ehthumbs.db
+ehthumbs_vista.db
+desktop.ini
+$RECYCLE.BIN/
 
 
 # ============================================================
@@ -142,6 +161,8 @@ tmp/
 temp/
 *.tmp
 *.bak
+*.orig
+*.rej
 
 
 # ============================================================
@@ -166,6 +187,12 @@ pnpm-debug.log*
 .next/
 dist/
 build/
+
+# Vite/tsc incremental caches — normally under node_modules/ already, kept
+# here defensively in case a tool's config points them elsewhere.
+.vite/
+*.tsbuildinfo
+.eslintcache
 
 .local
 
