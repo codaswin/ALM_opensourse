@@ -70,8 +70,13 @@ jobs:
       - name: Build frozen backend sidecar
         run: bash scripts/build-sidecar.sh
 
+      # Deliberately run from the repo root, not src-tauri/ — the Tauri
+      # CLI resolves beforeBuildCommand's cwd differently depending on
+      # where it's invoked from, and repo-root is the invocation this repo
+      # actually tests (README's documented install steps, local dev). A
+      # `working-directory: src-tauri` variant of this step looked for
+      # frontend/package.json at the repo root instead and failed.
       - name: Build Tauri bundles (AppImage, deb, rpm)
-        working-directory: src-tauri
         run: npx @tauri-apps/cli@2 build
 
       - name: Publish GitHub Release
