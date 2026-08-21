@@ -7,10 +7,12 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
+from app.credential_store import OSKeyringCredentialStore
 from app.database import Base, configure_engine
 from app.desktop_auth import LAUNCH_TOKEN_ENV
 from app.local_identity import LocalIdentity
 from app.main import app, get_db
+from app.memory import platform_credentials
 from app.models.auth import DashboardUserRecord
 from app.runtime import (
     APP_DATA_DIR_ENV,
@@ -104,6 +106,30 @@ _CURRENT_TEST_ADMIN_ID: str | None = None
 _TEST_LAUNCH_TOKEN = "test-suite-launch-token-with-at-least-32-characters"
 
 
+class _FakeKeyringBackend:
+    """In-memory stand-in for the real OS keyring — a CI container has no
+
+    Secret Service/KWallet daemon, so platform_credentials._get_desktop_store()
+    would otherwise raise CredentialStoreUnavailable the moment any
+    credential-saving test runs under the desktop-mode `client` fixture. Same
+    pattern as test_credential_store.py's _FakeKeyring.
+    """
+
+    priority = 1.0
+
+    def __init__(self) -> None:
+        self._values: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service: str, username: str) -> str | None:
+        return self._values.get((service, username))
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        self._values[(service, username)] = password
+
+    def delete_password(self, service: str, username: str) -> None:
+        self._values.pop((service, username), None)
+
+
 @pytest_asyncio.fixture
 async def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> AsyncIterator[AsyncClient]:
     global _CURRENT_TEST_ADMIN_ID
@@ -118,6 +144,9 @@ async def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> AsyncIterat
     identity = LocalIdentity(installation_id="test-installation", user_id="test-owner-id")
     app.state.desktop_identity = identity
     _CURRENT_TEST_ADMIN_ID = identity.user_id
+    platform_credentials.configure_desktop_store(
+        OSKeyringCredentialStore(identity.installation_id, _FakeKeyringBackend())
+    )
 
     factory = async_sessionmaker(bind=engine, expire_on_commit=False)
     async with factory() as session:
@@ -148,6 +177,7 @@ async def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> AsyncIterat
         app.dependency_overrides.pop(get_db, None)
         await engine.dispose()
         reset_runtime_profile()
+        platform_credentials.configure_desktop_store(None)
         _CURRENT_TEST_ADMIN_ID = None
 
 
