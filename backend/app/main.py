@@ -55,19 +55,9 @@ from app.safety.approval_gate import (
     SystemPausedError,
 )
 from app.safety.api_auth import (
-    authenticate_credentials,
-    authenticate_request,
     authorize_request,
-    clear_session_cookie,
-    create_user,
     current_user,
-    ensure_bootstrap_admin,
     is_public_path,
-    list_dashboard_users,
-    require_role,
-    revoke_session,
-    rotate_csrf_token,
-    set_session_cookie,
 )
 from app.safety.secrets import CredentialEncryptionError
 from app import backup as backup_module
@@ -77,7 +67,7 @@ from app.runtime import get_runtime_profile
 from app.tenancy.context import reset_current_user_id, set_current_user_id
 from app.tenancy.paths import user_vector_store_path
 from app.tools import connection_test
-from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
@@ -132,8 +122,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             identity = load_or_create_local_identity(ApplicationPaths.for_desktop(profile))
             await ensure_local_owner(session, identity)
             app.state.desktop_identity = identity
-        else:
-            await ensure_bootstrap_admin(session)
         await platform_credentials.load_all_saved_credentials(session)
     start_scheduler()
     logger.info("app_startup_complete")
@@ -145,7 +133,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="AI LinkedIn Manager",
     description="Runtime API for agent settings, the human-approval queue, and the self-learning review queue.",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
     docs_url=None if _production_mode() else "/docs",
     redoc_url=None if _production_mode() else "/redoc",
@@ -161,7 +149,10 @@ async def _dashboard_session_guard(request: Request, call_next):
         if profile.is_desktop:
             user = authenticate_desktop_request(request, request.app.state.desktop_identity)
         else:
-            user = await authenticate_request(request)
+            # Self-hosted/server-mode login lived here; that deployment now
+            # lives in a separate repository, so this build has no way to
+            # authenticate a non-desktop request.
+            raise HTTPException(status_code=501, detail="Server mode is not available in this build")
         authorize_request(request, user)
     except HTTPException as exc:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
@@ -271,96 +262,23 @@ async def get_db() -> AsyncIterator[AsyncSession]:
     async for session in get_session():
         yield session
 # ---------------------------------------------------------------------------
-# Dashboard authentication
+# Dashboard authentication — desktop-only. The frontend still calls /auth/me
+# to learn who the current (single, local-owner) user is; there is no
+# password login, no session cookie, and no admin user-invite in this build
+# (that belonged to self-hosted/server mode, which now lives in a separate
+# repository).
 # ---------------------------------------------------------------------------
-
-
-class LoginBody(BaseModel):
-    username: str
-    password: str
-
-
-@app.post("/auth/login")
-async def login(body: LoginBody, request: Request, response: Response) -> dict[str, Any]:
-    if get_runtime_profile().is_desktop:
-        raise HTTPException(status_code=404, detail="Password login is not available in desktop mode")
-    async with get_session_factory()() as db:
-        user, session_token, csrf_token = await authenticate_credentials(
-            db,
-            body.username,
-            body.password,
-            request.client.host if request.client else None,
-        )
-    set_session_cookie(response, session_token)
-    return {"user": {"id": user.id, "username": user.username, "role": user.role}, "csrf_token": csrf_token}
 
 
 @app.get("/auth/me")
 async def auth_me(request: Request) -> dict[str, Any]:
     user = current_user(request)
-    if get_runtime_profile().is_desktop:
-        return {"user": {"id": user.id, "username": user.username, "role": user.role}, "csrf_token": None}
-    csrf_token = await rotate_csrf_token(request)
-    return {"user": {"id": user.id, "username": user.username, "role": user.role}, "csrf_token": csrf_token}
+    return {"user": {"id": user.id, "username": user.username, "role": user.role}, "csrf_token": None}
 
 
 @app.post("/auth/logout")
-async def logout(request: Request, response: Response) -> dict[str, bool]:
-    if get_runtime_profile().is_desktop:
-        return {"logged_out": True}
-    await revoke_session(request)
-    clear_session_cookie(response)
+async def logout(request: Request) -> dict[str, bool]:
     return {"logged_out": True}
-
-
-# ---------------------------------------------------------------------------
-# Admin — inviting new dashboard users. This app is invite-only: there is no
-# public signup route, only an admin-gated one. Every dashboard user gets
-# their own fully isolated workspace (credentials, approvals, activity,
-# brand voice, RAG, scheduled automation — see plans/peaceful-scribbling-tiger.md),
-# so "admin" no longer means "can manage the shared app's credentials" (there
-# is no more shared credential set) — it means exactly one thing: can invite
-# further users. A regular invited user defaults to "operator", which is
-# already enough role to fully read/write everything in their OWN workspace
-# (see authorize_request in api_auth.py) without also being able to invite
-# others.
-# ---------------------------------------------------------------------------
-
-
-def _dashboard_user_dict(user: Any) -> dict[str, Any]:
-    return {
-        "id": user.id,
-        "username": user.username,
-        "role": user.role,
-        "active": user.active,
-        "created_at": user.created_at,
-        "last_login_at": user.last_login_at,
-    }
-
-
-@app.get("/admin/users")
-async def list_users(request: Request, db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
-    require_role(request, minimum="admin")
-    users = await list_dashboard_users(db)
-    return [_dashboard_user_dict(u) for u in users]
-
-
-class CreateUserBody(BaseModel):
-    username: str
-    password: str
-    role: Literal["viewer", "operator", "admin"] = "operator"
-
-
-@app.post("/admin/users")
-async def create_dashboard_user(
-    body: CreateUserBody, request: Request, db: AsyncSession = Depends(get_db)
-) -> dict[str, Any]:
-    require_role(request, minimum="admin")
-    try:
-        user = await create_user(db, body.username, body.password, role=body.role)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _dashboard_user_dict(user)
 
 
 # ---------------------------------------------------------------------------

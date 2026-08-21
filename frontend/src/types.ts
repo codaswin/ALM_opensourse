@@ -223,16 +223,3 @@ export interface BackupManifest {
   includes_rag: boolean;
   size_bytes: number;
 }
-
-// -- Admin: dashboard users ------------------------------------------------
-// Invite-only account creation — GET/POST /admin/users, admin role required.
-// Never carries a password or password hash.
-
-export interface DashboardUser {
-  id: string;
-  username: string;
-  role: DashboardRole;
-  active: boolean;
-  created_at: string;
-  last_login_at: string | null;
-}

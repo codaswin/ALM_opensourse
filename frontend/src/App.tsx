@@ -1,8 +1,8 @@
-import { Component, useEffect, useState, type ComponentType, type FormEvent, type ReactNode } from "react";
-import { Activity, Bot, BrainCircuit, ChevronRight, CircleDollarSign, Command, Eye, EyeOff, LockKeyhole, LogOut, Menu, MessageSquareText, Moon, Network, Settings2, ShieldCheck, Sparkles, Sun, Users, UserRound, Workflow, X } from "lucide-react";
+import { Component, useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { Activity, Bot, BrainCircuit, ChevronRight, CircleDollarSign, Command, Menu, MessageSquareText, Moon, Network, Settings2, ShieldCheck, Sparkles, Sun, UserRound, Workflow, X } from "lucide-react";
 import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import "./App.css";
-import { ApiError, getCurrentSession, getRuntimeBootstrap, initializeApiTransport, login, logout } from "./api";
+import { getCurrentSession, getRuntimeBootstrap, initializeApiTransport } from "./api";
 import { ActivityBanner } from "./components/ActivityBanner";
 import { ThemeProvider } from "./ThemeProvider";
 import { useTheme } from "./themeStore";
@@ -15,37 +15,20 @@ import { DiagnosticsView } from "./views/DiagnosticsView";
 import { LandingPage } from "./views/LandingPage";
 import { LearningProposalsView } from "./views/LearningProposalsView";
 import { SettingsView } from "./views/SettingsView";
-import { UsersView } from "./views/UsersView";
 import { WorkflowsView } from "./views/WorkflowsView";
 
 type NavIcon = ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
 const TABS = [
-  { id: "workflows", label: "Workflows", description: "Run agent tasks", icon: Workflow, group: "Workspace", adminOnly: false, render: () => <WorkflowsView /> },
-  { id: "approvals", label: "Approval Queue", description: "Review gated actions", icon: ShieldCheck, group: "Workspace", adminOnly: false, render: () => <ApprovalQueueView /> },
-  { id: "connections", label: "Connections", description: "Manage integrations", icon: Network, group: "Workspace", adminOnly: false, render: (session: DashboardSession) => <ConnectionsView currentUserId={session.user.id} /> },
-  { id: "brand-voice", label: "Brand Voice", description: "Define writing style", icon: MessageSquareText, group: "Intelligence", adminOnly: false, render: () => <BrandVoiceView /> },
-  { id: "learning", label: "Self-Learning", description: "Review proposals", icon: BrainCircuit, group: "Intelligence", adminOnly: false, render: () => <LearningProposalsView /> },
-  { id: "settings", label: "Agent Settings", description: "Configure behavior", icon: Settings2, group: "System", adminOnly: false, render: () => <SettingsView /> },
-  { id: "cost", label: "Usage & Cost", description: "Track daily spend", icon: CircleDollarSign, group: "System", adminOnly: false, render: () => <CostView /> },
-  { id: "diagnostics", label: "Diagnostics", description: "Check service health", icon: Activity, group: "System", adminOnly: false, render: () => <DiagnosticsView /> },
-  // Invite-only account creation — only admins can see or reach this tab
-  // (also enforced server-side by require_role(minimum="admin") on
-  // GET/POST /admin/users, so hiding the tab is a UX nicety, not the guard).
-  { id: "users", label: "Users", description: "Invite teammates", icon: Users, group: "System", adminOnly: true, render: () => <UsersView /> },
-] as const satisfies readonly { id: string; label: string; description: string; icon: NavIcon; group: string; adminOnly: boolean; render: (session: DashboardSession) => React.ReactNode }[];
+  { id: "workflows", label: "Workflows", description: "Run agent tasks", icon: Workflow, group: "Workspace", render: () => <WorkflowsView /> },
+  { id: "approvals", label: "Approval Queue", description: "Review gated actions", icon: ShieldCheck, group: "Workspace", render: () => <ApprovalQueueView /> },
+  { id: "connections", label: "Connections", description: "Manage integrations", icon: Network, group: "Workspace", render: (session: DashboardSession) => <ConnectionsView currentUserId={session.user.id} /> },
+  { id: "brand-voice", label: "Brand Voice", description: "Define writing style", icon: MessageSquareText, group: "Intelligence", render: () => <BrandVoiceView /> },
+  { id: "learning", label: "Self-Learning", description: "Review proposals", icon: BrainCircuit, group: "Intelligence", render: () => <LearningProposalsView /> },
+  { id: "settings", label: "Agent Settings", description: "Configure behavior", icon: Settings2, group: "System", render: () => <SettingsView /> },
+  { id: "cost", label: "Usage & Cost", description: "Track daily spend", icon: CircleDollarSign, group: "System", render: () => <CostView /> },
+  { id: "diagnostics", label: "Diagnostics", description: "Check service health", icon: Activity, group: "System", render: () => <DiagnosticsView /> },
+] as const satisfies readonly { id: string; label: string; description: string; icon: NavIcon; group: string; render: (session: DashboardSession) => React.ReactNode }[];
 const NAV_GROUPS = ["Workspace", "Intelligence", "System"] as const;
-const SERVER_RUNTIME_FALLBACK: RuntimeBootstrap = {
-  mode: "server",
-  user: { id: "", username: "", role: "viewer" },
-  capabilities: {
-    requires_login: true,
-    supports_multiple_users: true,
-    supports_user_administration: true,
-    uses_distributed_scheduler_coordination: true,
-    runs_scheduler_only_while_app_is_open: false,
-  },
-  api_version: "unknown",
-};
 
 function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
@@ -70,70 +53,10 @@ function ThemeToggle() {
   </button>;
 }
 
-function LoginScreen({ onAuthenticated }: { onAuthenticated: (session: DashboardSession) => void }) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [passwordVisible, setPasswordVisible] = useState(false);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSubmitting(true);
-    setError(null);
-    try {
-      onAuthenticated(await login(username, password));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Sign in failed");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return <main className="login-shell">
-    <motion.form
-      className="login-panel"
-      onSubmit={(event) => void handleSubmit(event)}
-      initial={{ opacity: 0, scale: 0.96, filter: "blur(4px)" }}
-      animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-      transition={{ type: "spring", stiffness: 380, damping: 32 }}
-    >
-      <div className="login-brand"><span className="sidebar-brand-mark"><Bot size={22} /></span><span><strong>AI LinkedIn</strong><small>Manager</small></span></div>
-      <div className="login-heading"><span><LockKeyhole size={19} /></span><div><h1>Dashboard sign in</h1><p>Use your assigned workspace account.</p></div></div>
-      {error && <p className="login-error" role="alert">{error}</p>}
-      <label className="login-field"><span>Username</span><input autoComplete="username" required value={username} onChange={(event) => setUsername(event.target.value)} /></label>
-      <label className="login-field">
-        <span>Password</span>
-        <div className="login-password-field">
-          <input
-            type={passwordVisible ? "text" : "password"}
-            autoComplete="current-password"
-            required
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-          <button
-            type="button"
-            className="login-password-toggle"
-            onClick={() => setPasswordVisible((visible) => !visible)}
-            aria-label={passwordVisible ? "Hide password" : "Show password"}
-            aria-pressed={passwordVisible}
-            tabIndex={-1}
-          >
-            {passwordVisible ? <EyeOff size={16} /> : <Eye size={16} />}
-          </button>
-        </div>
-      </label>
-      <button className="login-submit" type="submit" disabled={submitting}>{submitting ? "Signing in..." : "Sign in"}</button>
-    </motion.form>
-  </main>;
-}
-
-function Dashboard({ session, runtime, onSignedOut }: { session: DashboardSession; runtime: RuntimeBootstrap; onSignedOut: () => void }) {
+function Dashboard({ session }: { session: DashboardSession }) {
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]["id"]>("workflows");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const visibleTabs = TABS.filter((tab) => !tab.adminOnly || (runtime.capabilities.supports_user_administration && session.user.role === "admin"));
-  const active = visibleTabs.find((tab) => tab.id === activeTab) ?? visibleTabs[0];
+  const active = TABS.find((tab) => tab.id === activeTab) ?? TABS[0];
   const ActiveIcon = active.icon;
 
   useEffect(() => {
@@ -144,7 +67,6 @@ function Dashboard({ session, runtime, onSignedOut }: { session: DashboardSessio
   }, [sidebarOpen]);
 
   const selectTab = (id: (typeof TABS)[number]["id"]) => { setActiveTab(id); setSidebarOpen(false); };
-  const handleLogout = async () => { await logout().catch(() => undefined); onSignedOut(); };
 
   return <div className="app-shell">
     <ActivityBanner />
@@ -164,7 +86,7 @@ function Dashboard({ session, runtime, onSignedOut }: { session: DashboardSessio
         <nav className="sidebar-nav" aria-label="Primary navigation">
           {NAV_GROUPS.map((group) => <div className="sidebar-group" key={group}>
             <span className="sidebar-group-label">{group}</span>
-            {visibleTabs.filter((tab) => tab.group === group).map((tab) => {
+            {TABS.filter((tab) => tab.group === group).map((tab) => {
               const Icon = tab.icon;
               const isActive = tab.id === activeTab;
               return <button key={tab.id} type="button" className={isActive ? "sidebar-item sidebar-item-active" : "sidebar-item"} onClick={() => selectTab(tab.id)} aria-current={isActive ? "page" : undefined}>
@@ -184,7 +106,6 @@ function Dashboard({ session, runtime, onSignedOut }: { session: DashboardSessio
         </nav>
         <div className="sidebar-footer">
           <div className="sidebar-user"><span className="sidebar-user-avatar"><UserRound size={16} /></span><span className="sidebar-user-details"><strong>{session.user.username}</strong><small>{session.user.role}</small></span></div>
-          {runtime.capabilities.requires_login && <button type="button" className="theme-toggle" onClick={() => void handleLogout()} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button>}
           <ThemeToggle />
         </div>
       </aside>
@@ -260,24 +181,20 @@ function AuthenticatedApp() {
       .then((bootstrap) => { setRuntime(bootstrap); return getCurrentSession(); })
       .then(setSession)
       .catch((error: unknown) => {
-        if (error instanceof ApiError && error.status === 401) {
-          setRuntime(SERVER_RUNTIME_FALLBACK);
-          return;
-        }
         console.error(error);
         setStartupError(error instanceof Error ? error.message : "Startup failed");
       })
       .finally(() => setChecking(false));
   }, [startupAttempt]);
 
+  if (!pastLanding) return <LandingPage onEnter={() => setPastLanding(true)} />;
   if (checking) return <div className="auth-loading"><span className="auth-spinner" /><span>Starting secure workspace</span></div>;
   if (startupError) return <StartupFailure message={startupError} onRetry={() => setStartupAttempt((value) => value + 1)} />;
   if (session && runtime) {
     if (runtime.mode === "desktop" && !desktopOnboarded) return <DesktopWelcome onContinue={() => { localStorage.setItem("desktop-onboarding-complete-v1", "true"); setDesktopOnboarded(true); }} />;
-    return <Dashboard session={session} runtime={runtime} onSignedOut={() => { setSession(null); setPastLanding(false); }} />;
+    return <Dashboard session={session} />;
   }
-  if (!pastLanding) return <LandingPage onEnter={() => setPastLanding(true)} />;
-  return <LoginScreen onAuthenticated={setSession} />;
+  return null;
 }
 
 export default function App() {

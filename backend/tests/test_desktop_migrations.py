@@ -29,7 +29,7 @@ async def test_desktop_migrations_create_current_schema_and_backup_on_upgrade(
             await connection.execute(text("SELECT version_num FROM alembic_version"))
         ).scalar_one()
     await engine.dispose()
-    assert revision == "20260820_0010"
+    assert revision == "20260821_0011"
 
     backup = await asyncio.to_thread(run_desktop_migrations, paths, url)
     assert backup is not None

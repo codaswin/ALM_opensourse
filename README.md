@@ -5,7 +5,7 @@
 Free and open source (MIT). A **desktop app** — runs on your own computer, with your own credentials, in your own OS's secure credential store. Nobody's server, nobody's API keys, nobody's data but yours.
 
 <p align="center">
-  <em>5 runtime agents · 19 tools (6 require human approval) · 6 research sources · 592 tests</em>
+  <em>5 runtime agents · 19 tools (6 require human approval) · 6 research sources · 581 tests</em>
 </p>
 
 ---
@@ -628,7 +628,7 @@ Being upfront: a plain `README.md` rendered on GitHub can't run real animation �
 | X integration | Composio, read-only scope | Optional research source only |
 | Web search | `ddgs` (DuckDuckGo) | No API key, swappable via `WebSearchProvider` interface |
 | RSS parsing | `feedparser` | Handles RSS 2.0 / Atom / RDF dialect variance |
-| Testing | pytest + pytest-asyncio + pytest-cov | 592 tests |
+| Testing | pytest + pytest-asyncio + pytest-cov | 581 tests |
 
 ---
 
@@ -787,24 +787,24 @@ bash scripts/build-sidecar.sh
 cd src-tauri && cargo check
 ```
 
-Current state: **592 tests passing**, ruff/mypy clean, frontend lint/build clean, tool-registry audit green, safety audit green. `.github/workflows/ci.yml` runs the backend and frontend gates above on every push/PR, plus a `desktop` job that compiles the Tauri shell natively on Ubuntu, Windows, and macOS runners.
+Current state: **581 tests passing**, ruff/mypy clean, frontend lint/build clean, tool-registry audit green, safety audit green. `.github/workflows/ci.yml` runs the backend and frontend gates above on every push/PR, plus a `desktop` job that compiles the Tauri shell natively on Ubuntu, Windows, and macOS runners.
 
 ---
 
 ## Project Status
 
-Honest state, not aspirational: **version 0.1.0 is a working desktop development build — not a signed, downloadable release yet.**
+Honest state, not aspirational: **version 0.2.0 has real, downloadable Linux installers — still unsigned, and Windows/macOS aren't published yet.**
 
 What's real and tested today:
 
 - Every agent, safety gate, tool, eval, and the self-learning loop — all of it.
-- On Linux: building it produces a real, working `.deb`/`.rpm`/`.AppImage`; smoke-tested — launches without any manually-installed Python/PostgreSQL/Redis, migrates its own SQLite database, authenticates its loopback API, and shuts down its sidecar cleanly with no orphan process (a real bug found and fixed this way: the frozen sidecar's own child process used to survive after the app closed).
+- On Linux: `.deb`/`.rpm`/`.AppImage` are built and published automatically via `.github/workflows/release.yml` whenever a version tag is pushed, and the one-line installer above downloads and installs the right one for your system. Smoke-tested — launches without any manually-installed Python/PostgreSQL/Redis, migrates its own SQLite database, authenticates its loopback API, and shuts down its sidecar cleanly with no orphan process (a real bug found and fixed this way: the frozen sidecar's own child process used to survive after the app closed).
+- This repository is desktop-only: the self-hosted/multi-user dashboard login (password auth, cookie sessions, CSRF, admin user-invite) and the Docker/VPS deployment infrastructure that used to live here have been removed — self-hosted deployment is maintained in a separate repository now. A non-desktop request against this codebase gets a clean `501`, not a half-working login screen.
 
 What's not done yet:
 
-- **Windows and macOS installers** haven't been built and smoke-tested on native machines — only compiled (`cargo check`) on GitHub-hosted CI runners so far. There's no guarantee a packaged build behaves identically there until that happens.
-- **No code-signing, notarization, or update mechanism** exists yet — installers you build yourself are unsigned, and there's no auto-updater configured. That's a deliberate choice: shipping a real, secure signing/update pipeline is real infrastructure work, not something to fake.
-- **No pre-built downloads** — Install above involves building from source. A GitHub Releases page with real signed artifacts is the natural next milestone once the above is done.
+- **Windows and macOS installers** haven't been built and published — only compiled (`cargo check`) on GitHub-hosted CI runners so far. There's no guarantee a packaged build behaves identically there until real installers are built and smoke-tested.
+- **No code-signing, notarization, or auto-update mechanism** exists yet — the published installers are unsigned, and the app won't self-update. That's a deliberate choice: shipping a real, secure signing/update pipeline is real infrastructure work, not something to fake. Check the [Releases page](https://github.com/codaswin/ALM_opensourse/releases) for new versions manually in the meantime.
 
 See [`docs/desktop-implementation-status.md`](docs/desktop-implementation-status.md) for the detailed, continuously-updated list of what's verified vs. still open, and [`docs/desktop-migration-audit.md`](docs/desktop-migration-audit.md) for how the desktop shell was designed.
 
@@ -828,11 +828,12 @@ See [`docs/desktop-implementation-status.md`](docs/desktop-implementation-status
 - [x] Desktop runtime — Tauri shell, frozen Python sidecar, SQLite + OS keyring, no login, no PostgreSQL/Redis dependency
 - [x] Live-tested provider connectivity checks (`POST /credentials/{id}/test`) and a Diagnostics view for every backing service
 - [x] Production hardening: OS keyring credential storage, Alembic-first startup with pre-migration backup, durable lock-protected FAISS snapshots, CI (backend + frontend + native desktop compile matrix), and centralized Python tooling config
+- [x] A GitHub Releases page with downloadable Linux artifacts, published automatically by `.github/workflows/release.yml` on every version tag, plus a one-line installer script
+- [x] Desktop-only cleanup — the self-hosted/multi-user dashboard login and Docker/VPS deployment infrastructure have been fully removed from this repository
 
 **In progress / explicitly not done:**
 - [ ] Signed Windows and macOS installers, built and smoke-tested on native machines
 - [ ] Code signing, notarization, and an auto-updater
-- [ ] A GitHub Releases page with downloadable, pre-built artifacts
 
 **Explicitly post-MVP (per the original spec):**
 - [ ] Connection-relationship knowledge graph

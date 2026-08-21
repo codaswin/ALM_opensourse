@@ -35,14 +35,18 @@
 - Transfer the launch token by inherited stdin/pipe, not command-line arguments or files.
 - Allow only the packaged application origin and a narrow Tauri capability set.
 - Disable API documentation and reject browser requests without the launch token.
-- Redact credentials, cookies, CSRF values, launch tokens, provider responses, and sensitive post/message content according to log policy.
+- Redact credentials, launch tokens, provider responses, and sensitive post/message content according to log policy.
 - Refuse insecure OS-keyring fallback.
 - Preserve data on ordinary uninstall by default; require explicit confirmation for reset/delete.
 - Back up before schema or RAG-format migration and surface recovery rather than silently resetting.
 
 ## Hosted threat controls
 
-Preserve HttpOnly/Secure/SameSite cookies, rotating CSRF tokens, RBAC, login throttling, CORS allowlists, encrypted credential rows, tenant-scoped queries, and distributed scheduler locking. Repair legacy entity-only memory and notification identifiers before advertising complete isolation.
+This repository is desktop-only; the self-hosted/multi-user dashboard login
+(cookies, CSRF, RBAC, login throttling) that these controls described now
+lives in a separate repository. A non-desktop request against this build
+gets a `501` rather than being authenticated — see `app/safety/api_auth.py`
+and the `_dashboard_session_guard` middleware in `app/main.py`.
 
 ## Required verification
 

@@ -1,17 +1,17 @@
 # AI LinkedIn Manager — Dashboard
 
-React + Vite + TypeScript UI for the [AI LinkedIn Manager](../README.md). The same build runs inside the Tauri desktop shell and as the optional web/VPS dashboard.
+React + Vite + TypeScript UI for the [AI LinkedIn Manager](../README.md) desktop app. Runs embedded inside the Tauri desktop window.
 
 | View | Backend resource | What it does |
 |------|-------------------|----------------|
+| Workflows | `POST /workflows/*` | Run research, content, analytics, and engagement workflows |
 | Approval Queue | `GET/POST /approvals/*` | Review every pending gated action (publish/schedule/delete/reply/DM/connection-request) with full argument content shown, approve or reject |
+| Connections | `GET/POST /credentials/*`, `POST /credentials/{id}/test` | Manage integration credentials and connected accounts, and test them against the real provider |
+| Brand Voice | `GET/POST /brand-voice/*` | Maintain writing-style profiles |
 | Self-Learning | `GET/POST /learning/proposals/*`, `POST /learning/reflect` | Review reflection-job proposals, trigger an on-demand reflection run |
 | Settings | `GET/PUT /settings/{key}` | View/edit agent settings (e.g. `research_agent.poll_interval`) |
 | Cost | `GET /cost` | Today's LLM spend vs. the daily cap |
-| Workflows | `POST /workflows/*` | Run research, content, analytics, and engagement workflows |
-| Connections | `GET/POST /credentials/*` | Manage integration credentials and connected accounts |
-| Brand Voice | `GET/POST /brand-voice/*` | Maintain writing-style profiles |
-| Users (server only) | `GET/POST /admin/users` | Administer hosted workspace accounts |
+| Diagnostics | `GET /diagnostics`, `GET/POST /backup` | Live health of every backing service, plus one-click workspace backups |
 
 ## Run locally
 
@@ -32,6 +32,6 @@ npm run preview    # serve the production build locally
 
 ## Notes
 
-- **Identity**: hosted mode uses the authenticated workspace account; desktop mode uses a stable local-owner identity created for the installation. Approval audit records derive the actor server-side.
+- **Identity**: a stable local-owner identity is created for the installation on first launch (`app/local_identity.py`) — no username/password, no login screen. The Tauri shell authenticates the webview to its own local backend sidecar via a per-launch bearer token. Approval audit records derive the actor server-side.
 - **`approveApproval` vs `rejectApproval` response shapes differ** (`src/types.ts`'s `ToolExecutionResult` vs `ApprovalRequest`) — that's a real asymmetry in `backend/app/main.py`, not a frontend bug: approving actually executes the gated tool and returns its raw result; rejecting just updates the approval record.
 - No settings-listing endpoint exists (`memory/settings.py` is a key-by-key store) — the Settings view shows the one known seeded key and offers a lookup box for any other key by name, rather than trying to enumerate all settings.

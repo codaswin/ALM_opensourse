@@ -6,8 +6,6 @@ import type {
   BackupManifest,
   ConnectionTestResult,
   CostSummary,
-  DashboardRole,
-  DashboardUser,
   DiagnosticsReport,
   LearningProposal,
   PlatformCredentialStatus,
@@ -22,16 +20,8 @@ import type {
 
 let apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8010";
 let desktopLaunchToken: string | null = null;
-let csrfToken: string | null = null;
-// /auth/me issues a fresh CSRF token on every call (it doubles as the
-// refresh mechanism after a page reload wipes the module-level csrfToken
-// above). If it's ever called twice concurrently — e.g. React StrictMode's
-// double-invoked mount effect — both calls rotate the token server-side,
-// and whichever response resolves second wins; if responses arrive out of
-// order, the browser can end up holding an already-superseded token, and
-// every write after that fails with "Missing or invalid CSRF token" until
-// the next reload. Sharing one in-flight promise across concurrent callers
-// collapses them into a single rotation, so there's never a race to lose.
+// Deduplicates concurrent /auth/me calls (e.g. React StrictMode's
+// double-invoked mount effect) into a single in-flight request.
 let sessionCheckInFlight: Promise<DashboardSession> | null = null;
 
 export class ApiError extends Error {
@@ -82,14 +72,12 @@ export async function initializeApiTransport(): Promise<void> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const method = (init?.method ?? "GET").toUpperCase();
   const response = await fetch(apiBaseUrl + path, {
     ...init,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...(desktopLaunchToken ? { Authorization: "Bearer " + desktopLaunchToken } : {}),
-      ...(csrfToken && !["GET", "HEAD", "OPTIONS"].includes(method) ? { "X-CSRF-Token": csrfToken } : {}),
       ...init?.headers,
     },
   });
@@ -105,35 +93,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 // -- Authentication -----------------------------------------------------
 
-export const login = async (username: string, password: string): Promise<DashboardSession> => {
-  const session = await request<DashboardSession>("/auth/login", {
-    method: "POST",
-    body: JSON.stringify({ username, password }),
-  });
-  csrfToken = session.csrf_token;
-  return session;
-};
-
 export const getCurrentSession = (): Promise<DashboardSession> => {
   if (!sessionCheckInFlight) {
-    sessionCheckInFlight = request<DashboardSession>("/auth/me")
-      .then((session) => {
-        csrfToken = session.csrf_token;
-        return session;
-      })
-      .finally(() => {
-        sessionCheckInFlight = null;
-      });
+    sessionCheckInFlight = request<DashboardSession>("/auth/me").finally(() => {
+      sessionCheckInFlight = null;
+    });
   }
   return sessionCheckInFlight;
-};
-
-export const logout = async (): Promise<void> => {
-  try {
-    await request("/auth/logout", { method: "POST" });
-  } finally {
-    csrfToken = null;
-  }
 };
 
 // -- Health -------------------------------------------------------------
@@ -279,13 +245,3 @@ export const fetchDiagnostics = (): Promise<DiagnosticsReport> => request("/diag
 export const listBackups = (): Promise<BackupManifest[]> => request("/backup");
 
 export const createBackup = (): Promise<BackupManifest> => request("/backup", { method: "POST" });
-
-// -- Admin: dashboard users (invite-only account creation) ------------------
-
-export const listUsers = (): Promise<DashboardUser[]> => request("/admin/users");
-
-export const createUser = (username: string, password: string, role: DashboardRole): Promise<DashboardUser> =>
-  request("/admin/users", {
-    method: "POST",
-    body: JSON.stringify({ username, password, role }),
-  });

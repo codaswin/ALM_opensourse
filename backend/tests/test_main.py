@@ -2,13 +2,23 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import pytest
 import pytest_asyncio
 from app.database import Base, configure_engine
+from app.desktop_auth import LAUNCH_TOKEN_ENV
+from app.local_identity import LocalIdentity
 from app.main import app, get_db
-from app.safety.api_auth import CSRF_HEADER_NAME, SESSION_COOKIE_NAME, authenticate_credentials, create_user
+from app.models.auth import DashboardUserRecord
+from app.runtime import (
+    APP_DATA_DIR_ENV,
+    RUNTIME_MODE_ENV,
+    build_runtime_profile,
+    configure_runtime_profile,
+    reset_runtime_profile,
+)
 
 # Every model touched by an endpoint under test must be imported here
 # explicitly, not relied upon transitively via some other test module having
@@ -82,31 +92,45 @@ def _isolate_llm_provider_env(monkeypatch: pytest.MonkeyPatch) -> None:
     secrets_module.reset_for_testing()
 
 
-# Set by the `client` fixture below to the freshly created "test-admin" dashboard
-# user's real id, for the handful of tests that need to seed a row directly
-# through the DB (bypassing HTTP, e.g. _seed_approval) with the SAME user_id the
-# session-guard middleware will resolve for every request `client` makes — every
-# tenant-scoped table's rows are now owned by a specific user_id (Stage 1/2,
-# plans/peaceful-scribbling-tiger.md), so a seeded row with the wrong (or no)
-# owner is invisible to/rejected by the very requests meant to exercise it.
+# Set by the `client` fixture below to the desktop test identity's real id,
+# for the handful of tests that need to seed a row directly through the DB
+# (bypassing HTTP, e.g. _seed_approval) with the SAME user_id the session-guard
+# middleware will resolve for every request `client` makes — every
+# tenant-scoped table's rows are owned by a specific user_id, so a seeded row
+# with the wrong (or no) owner is invisible to/rejected by the very requests
+# meant to exercise it.
 _CURRENT_TEST_ADMIN_ID: str | None = None
+
+_TEST_LAUNCH_TOKEN = "test-suite-launch-token-with-at-least-32-characters"
 
 
 @pytest_asyncio.fixture
-async def client() -> AsyncIterator[AsyncClient]:
+async def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> AsyncIterator[AsyncClient]:
     global _CURRENT_TEST_ADMIN_ID
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
     configure_engine(engine)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    profile = build_runtime_profile({RUNTIME_MODE_ENV: "desktop", APP_DATA_DIR_ENV: str(tmp_path)})
+    configure_runtime_profile(profile)
+    monkeypatch.setenv(LAUNCH_TOKEN_ENV, _TEST_LAUNCH_TOKEN)
+    identity = LocalIdentity(installation_id="test-installation", user_id="test-owner-id")
+    app.state.desktop_identity = identity
+    _CURRENT_TEST_ADMIN_ID = identity.user_id
+
     factory = async_sessionmaker(bind=engine, expire_on_commit=False)
     async with factory() as session:
-        admin = await create_user(session, "test-admin", "test-password-strong", role="admin")
-        _CURRENT_TEST_ADMIN_ID = admin.id
-        _, session_token, csrf_token = await authenticate_credentials(
-            session, "test-admin", "test-password-strong", "test-client"
+        session.add(
+            DashboardUserRecord(
+                id=identity.user_id,
+                username=identity.username,
+                password_hash="desktop-local-owner:no-password-login",
+                role=identity.role,
+                active=True,
+            )
         )
+        await session.commit()
 
     async def override_get_db() -> AsyncIterator[AsyncSession]:
         async with factory() as session:
@@ -117,13 +141,13 @@ async def client() -> AsyncIterator[AsyncClient]:
         async with AsyncClient(
             transport=ASGITransport(app=app),
             base_url="http://test",
-            cookies={SESSION_COOKIE_NAME: session_token},
-            headers={CSRF_HEADER_NAME: csrf_token},
+            headers={"Authorization": f"Bearer {_TEST_LAUNCH_TOKEN}"},
         ) as ac:
             yield ac
     finally:
         app.dependency_overrides.pop(get_db, None)
         await engine.dispose()
+        reset_runtime_profile()
         _CURRENT_TEST_ADMIN_ID = None
 
 
@@ -157,7 +181,7 @@ async def test_diagnostics_reports_every_component_live(client: AsyncClient) -> 
     response = await client.get("/diagnostics")
     assert response.status_code == 200
     body = response.json()
-    assert body["mode"] == "server"
+    assert body["mode"] == "desktop"
     components = body["components"]
     for key in ("backend", "database", "runtime_state", "scheduler", "vector_store", "credential_store"):
         assert components[key]["status"] in {"ok", "running", "stopped"}, key
@@ -165,7 +189,7 @@ async def test_diagnostics_reports_every_component_live(client: AsyncClient) -> 
 
 
 async def test_diagnostics_requires_authentication(client: AsyncClient) -> None:
-    client.cookies.set(SESSION_COOKIE_NAME, "")
+    client.headers.pop("Authorization", None)
     response = await client.get("/diagnostics")
     assert response.status_code == 401
 
@@ -188,13 +212,17 @@ async def test_test_credentials_for_untestable_platform_reports_unavailable(clie
     assert body["status"] == "unavailable"
 
 
-async def test_backup_is_a_no_op_in_hosted_server_mode(client: AsyncClient) -> None:
+async def test_backup_create_and_list_round_trip(client: AsyncClient) -> None:
     listed = await client.get("/backup")
     assert listed.status_code == 200
     assert listed.json() == []
 
     created = await client.post("/backup")
-    assert created.status_code == 409
+    assert created.status_code == 200
+
+    listed_after = await client.get("/backup")
+    assert listed_after.status_code == 200
+    assert len(listed_after.json()) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -406,9 +434,9 @@ async def test_activity_reports_current_state(client: AsyncClient) -> None:
     from app.activity import reset_for_testing, set_activity
     from app.tenancy import context as tenancy_context
 
-    # set_activity() is per-user (Stage 2) — set the tenancy context to the
-    # same "test-admin" id the /activity request below will resolve via the
-    # session-guard middleware, since this call happens outside any request.
+    # set_activity() is per-user — set the tenancy context to the same
+    # desktop test-owner id the /activity request below will resolve via
+    # the session-guard middleware, since this call happens outside any request.
     token = tenancy_context.set_current_user_id(_CURRENT_TEST_ADMIN_ID)
     try:
         reset_for_testing()
@@ -619,22 +647,15 @@ def test_app_boots_and_shuts_down_cleanly(monkeypatch) -> None:
     assert get_scheduler() is None  # stopped cleanly on shutdown
 
 
-async def test_protected_routes_require_authentication() -> None:
+async def test_non_desktop_requests_501_since_login_was_removed() -> None:
+    # No RUNTIME_MODE env var set here, so this exercises the default
+    # (server) profile. Self-hosted/server-mode login moved to a separate
+    # repository — this build can no longer authenticate a non-desktop
+    # request at all, so every protected route 501s rather than 401ing.
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anonymous:
         assert (await anonymous.get("/health")).status_code == 200
         response = await anonymous.get("/credentials")
-        assert response.status_code == 401
-        assert response.json()["detail"] == "Authentication required"
-
-
-async def test_mutations_require_csrf(client: AsyncClient) -> None:
-    csrf = client.headers.pop(CSRF_HEADER_NAME)
-    try:
-        response = await client.put("/settings/research_agent.poll_interval", json={"value": "hourly"})
-        assert response.status_code == 403
-        assert response.json()["detail"] == "Missing or invalid CSRF token"
-    finally:
-        client.headers[CSRF_HEADER_NAME] = csrf
+        assert response.status_code == 501
 
 
 async def test_browser_cannot_forge_setting_identity(client: AsyncClient) -> None:
@@ -643,7 +664,7 @@ async def test_browser_cannot_forge_setting_identity(client: AsyncClient) -> Non
         json={"value": "hourly", "updated_by": "forged-browser-user"},
     )
     assert response.status_code == 200
-    assert response.json()["updated_by"] == "test-admin"
+    assert response.json()["updated_by"] == "local-owner"
 
 
 async def test_browser_cannot_forge_approval_identity(client: AsyncClient) -> None:
@@ -654,130 +675,6 @@ async def test_browser_cannot_forge_approval_identity(client: AsyncClient) -> No
     async for db in override():
         record = await db.get(ApprovalRequestRecord, "appr-1")
         assert record is not None
-        assert record.decided_by == "test-admin"
+        assert record.decided_by == "local-owner"
         assert record.status == "failed"
         assert record.attempt_count == 1
-
-
-async def test_login_sets_secure_httponly_strict_cookie(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SESSION_COOKIE_SECURE", "true")
-    response = await client.post("/auth/login", json={"username": "test-admin", "password": "test-password-strong"})
-    assert response.status_code == 200
-    cookie = response.headers["set-cookie"]
-    assert "HttpOnly" in cookie
-    assert "Secure" in cookie
-    assert "SameSite=strict" in cookie
-
-
-async def test_viewer_role_can_read_but_not_mutate_their_own_workspace(client: AsyncClient) -> None:
-    # "viewer" no longer has a special /credentials-wide block — credentials
-    # (like everything else, post-multi-tenant-conversion) are scoped to the
-    # caller's own user_id, not a single shared admin-only resource. A viewer
-    # can read everything in their own workspace, but the generic
-    # GET-only-for-viewer rule in authorize_request still blocks mutations.
-    override = app.dependency_overrides[get_db]
-    async for db in override():
-        await create_user(db, "test-viewer", "viewer-password-strong", role="viewer")
-        _, token, csrf = await authenticate_credentials(db, "test-viewer", "viewer-password-strong", "test-client")
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
-        cookies={SESSION_COOKIE_NAME: token},
-        headers={CSRF_HEADER_NAME: csrf},
-    ) as viewer:
-        assert (await viewer.get("/approvals")).status_code == 200
-        assert (await viewer.get("/credentials")).status_code == 200
-        response = await viewer.put("/credentials/openai", json={"values": {"api_key": "sk-abcd1234"}})
-        assert response.status_code == 403
-        assert response.json()["detail"] == "operator role required"
-        response = await viewer.put("/settings/research_agent.poll_interval", json={"value": "hourly"})
-        assert response.status_code == 403
-        assert response.json()["detail"] == "operator role required"
-        # And admin-only endpoints stay admin-only regardless of the
-        # /credentials change above.
-        assert (await viewer.get("/admin/users")).status_code == 403
-        response = await viewer.post(
-            "/admin/users", json={"username": "sneaky", "password": "sneaky-password-strong"}
-        )
-        assert response.status_code == 403
-
-
-async def test_login_is_rate_limited_in_shared_state(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("DASHBOARD_LOGIN_MAX_ATTEMPTS", "2")
-    for _ in range(2):
-        response = await client.post("/auth/login", json={"username": "test-admin", "password": "wrong-password"})
-        assert response.status_code == 401
-    response = await client.post("/auth/login", json={"username": "test-admin", "password": "test-password-strong"})
-    assert response.status_code == 429
-
-
-# ---------------------------------------------------------------------------
-# Admin — inviting new dashboard users
-# ---------------------------------------------------------------------------
-
-
-async def test_create_user_happy_path_defaults_to_operator_role(client: AsyncClient) -> None:
-    response = await client.post(
-        "/admin/users", json={"username": "new-teammate", "password": "a-strong-password-123"}
-    )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["username"] == "new-teammate"
-    assert body["role"] == "operator"
-    assert body["active"] is True
-    assert "password" not in body
-    assert "password_hash" not in body
-
-
-async def test_create_user_can_set_explicit_role(client: AsyncClient) -> None:
-    response = await client.post(
-        "/admin/users", json={"username": "new-admin", "password": "a-strong-password-123", "role": "admin"}
-    )
-    assert response.status_code == 200
-    assert response.json()["role"] == "admin"
-
-
-async def test_create_user_rejects_duplicate_username(client: AsyncClient) -> None:
-    response = await client.post(
-        "/admin/users", json={"username": "test-admin", "password": "a-strong-password-123"}
-    )
-    assert response.status_code == 422
-
-
-async def test_create_user_rejects_short_password(client: AsyncClient) -> None:
-    response = await client.post("/admin/users", json={"username": "new-teammate", "password": "too-short"})
-    assert response.status_code == 422
-
-
-async def test_list_users_returns_every_dashboard_user_without_password_hashes(client: AsyncClient) -> None:
-    await client.post("/admin/users", json={"username": "new-teammate", "password": "a-strong-password-123"})
-    response = await client.get("/admin/users")
-    assert response.status_code == 200
-    body = response.json()
-    usernames = {u["username"] for u in body}
-    assert {"test-admin", "new-teammate"} <= usernames
-    assert all("password" not in u and "password_hash" not in u for u in body)
-
-
-async def test_admin_users_endpoints_require_authentication() -> None:
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anonymous:
-        assert (await anonymous.get("/admin/users")).status_code == 401
-        response = await anonymous.post(
-            "/admin/users", json={"username": "x", "password": "a-strong-password-123"}
-        )
-        assert response.status_code == 401
-
-
-async def test_bootstrap_password_rotation_revokes_existing_sessions(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from app.safety.api_auth import ensure_bootstrap_admin
-
-    monkeypatch.setenv("DASHBOARD_ADMIN_USERNAME", "test-admin")
-    monkeypatch.setenv("DASHBOARD_ADMIN_PASSWORD", "rotated-password-strong")
-    override = app.dependency_overrides[get_db]
-    async for db in override():
-        await ensure_bootstrap_admin(db)
-    assert (await client.get("/auth/me")).status_code == 401
-    response = await client.post("/auth/login", json={"username": "test-admin", "password": "rotated-password-strong"})
-    assert response.status_code == 200

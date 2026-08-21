@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from app.credential_store import OSKeyringCredentialStore
 from app.memory import platform_credentials
+from app.models.auth import DashboardUserRecord
 from app.models.platform_credential import PlatformCredentialRecord
 from app.runtime import (
     APP_DATA_DIR_ENV,
@@ -11,7 +12,6 @@ from app.runtime import (
     configure_runtime_profile,
     reset_runtime_profile,
 )
-from app.safety.api_auth import create_user
 
 
 class _FakeKeyring:
@@ -60,7 +60,15 @@ async def test_desktop_platform_credentials_never_store_secret_in_sqlite(
     configure_runtime_profile(profile)
     store = OSKeyringCredentialStore("install-a", _FakeKeyring())
     platform_credentials.configure_desktop_store(store)
-    user = await create_user(db_session, "desktop-owner", "not-used-on-desktop", role="operator")
+    user = DashboardUserRecord(
+        id="desktop-owner-id",
+        username="desktop-owner",
+        password_hash="desktop-local-owner:no-password-login",
+        role="operator",
+        active=True,
+    )
+    db_session.add(user)
+    await db_session.commit()
     try:
         await platform_credentials.save_platform_credentials(
             db_session, user.id, "openai", {"api_key": "desktop-secret"}
