@@ -1,6 +1,6 @@
 [package]
 name = "ai-linkedin-manager"
-version = "0.2.0"
+version = "0.2.1"
 description = "Human-controlled AI LinkedIn workspace"
 authors = ["Aswin"]
 license = "MIT"
