@@ -8,10 +8,13 @@ from app.database import get_session_factory
 from app.models.automation import ScheduledPostRecord
 from app.tenancy.context import get_current_user_id
 from app.tools.execution_context import current_idempotency_key
+from app.tools.rate_limit import daily_rate_limiter
 from app.tools.registry import ToolDefinition, registry
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+
+RATE_LIMIT_ENV_VAR = "LINKEDIN_API_RATE_LIMIT_POSTS_DAILY"
 
 
 class SchedulePostArgs(BaseModel):
@@ -48,6 +51,12 @@ async def execute(args: SchedulePostArgs) -> dict[str, t.Any]:
             ).scalar_one_or_none()
             if existing is not None:
                 return _result(existing)
+
+        # Shares its daily cap with publish_post (see app/safety/cost_cap.py's
+        # _ACTION_RATE_LIMITS) but is tracked as an independent counter —
+        # checked here, after the idempotency short-circuit above, so a retry
+        # of an already-scheduled post never consumes a second slot.
+        daily_rate_limiter.check_and_increment("schedule_post", RATE_LIMIT_ENV_VAR)
 
         record = ScheduledPostRecord(
             id=str(uuid.uuid4()),

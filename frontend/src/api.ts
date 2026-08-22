@@ -9,6 +9,7 @@ import type {
   DiagnosticsReport,
   LearningProposal,
   PlatformCredentialStatus,
+  RateLimitStatus,
   ReflectionResult,
   SettingValue,
   SystemStatus,
@@ -116,6 +117,16 @@ export const updateSetting = (key: string, value: string): Promise<SettingValue>
   request(`/settings/${encodeURIComponent(key)}`, {
     method: "PUT",
     body: JSON.stringify({ value }),
+  });
+
+// -- LinkedIn daily rate limits ---------------------------------------------
+
+export const listRateLimits = (): Promise<RateLimitStatus[]> => request("/rate-limits");
+
+export const updateRateLimit = (action: string, dailyLimit: number): Promise<RateLimitStatus> =>
+  request(`/rate-limits/${encodeURIComponent(action)}`, {
+    method: "PUT",
+    body: JSON.stringify({ daily_limit: dailyLimit }),
   });
 
 export const getSystemStatus = (): Promise<SystemStatus> => request("/system/status");

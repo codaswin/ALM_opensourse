@@ -48,6 +48,8 @@ from app.memory import brand_voice as brand_voice_memory
 from app.memory import platform_credentials
 from app.local_identity import ensure_local_owner, load_or_create_local_identity
 from app.memory.settings import get_setting, set_setting
+from app.tenancy import rate_limits as rate_limit_overrides
+from app.tools.rate_limit import RATE_LIMIT_SETTING_KEYS, daily_rate_limiter, load_all_saved_rate_limits
 from app.safety import approval_gate, kill_switch
 from app.safety.approval_gate import (
     ApprovalRequestAlreadyDecidedError,
@@ -71,7 +73,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -123,6 +125,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await ensure_local_owner(session, identity)
             app.state.desktop_identity = identity
         await platform_credentials.load_all_saved_credentials(session)
+        await load_all_saved_rate_limits(session)
     start_scheduler()
     logger.info("app_startup_complete")
     yield
@@ -439,6 +442,60 @@ async def update_setting(
 ) -> dict[str, Any]:
     record = await set_setting(db, key, body.value, updated_by=current_user(request).username)
     return {"key": record.key, "value": record.value, "updated_by": record.updated_by, "updated_at": record.updated_at}
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn daily rate limits — per-user overrides of the env-var-backed
+# defaults in app.tools.rate_limit. (slug, env var, label, rate_actions
+# sharing that cap) — publish_post/schedule_post share one configured cap
+# but are tracked as independent daily counters, so "used" sums both.
+# ---------------------------------------------------------------------------
+
+_RATE_LIMIT_GROUPS: list[tuple[str, str, str, tuple[str, ...]]] = [
+    ("posts", "LINKEDIN_API_RATE_LIMIT_POSTS_DAILY", "Posts (publish + schedule)", ("publish_post", "schedule_post")),
+    ("deletes", "LINKEDIN_API_RATE_LIMIT_DELETES_DAILY", "Deletes", ("delete_post",)),
+    ("replies", "LINKEDIN_API_RATE_LIMIT_REPLIES_DAILY", "Replies (comments + DMs)", ("reply_to_comment_or_dm",)),
+    (
+        "connections",
+        "LINKEDIN_API_RATE_LIMIT_CONNECTIONS_DAILY",
+        "Connection requests",
+        ("send_connection_request",),
+    ),
+    ("likes", "LINKEDIN_API_RATE_LIMIT_LIKES_DAILY", "Likes", ("like_post",)),
+]
+_RATE_LIMIT_GROUPS_BY_SLUG = {slug: (env_var, label, actions) for slug, env_var, label, actions in _RATE_LIMIT_GROUPS}
+
+
+def _rate_limit_status(slug: str, env_var: str, label: str, rate_actions: tuple[str, ...]) -> dict[str, Any]:
+    used = 0
+    limit = 0
+    for rate_action in rate_actions:
+        action_used, limit = daily_rate_limiter.peek(rate_action, env_var)
+        used += action_used
+    return {"action": slug, "label": label, "used": used, "limit": limit}
+
+
+@app.get("/rate-limits")
+async def list_rate_limits() -> list[dict[str, Any]]:
+    return [_rate_limit_status(slug, env_var, label, actions) for slug, env_var, label, actions in _RATE_LIMIT_GROUPS]
+
+
+class RateLimitUpdate(BaseModel):
+    daily_limit: int = Field(ge=0)
+
+
+@app.put("/rate-limits/{action}")
+async def update_rate_limit(
+    action: str, body: RateLimitUpdate, request: Request, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    group = _RATE_LIMIT_GROUPS_BY_SLUG.get(action)
+    if group is None:
+        raise HTTPException(status_code=404, detail=f"Unknown rate-limited action {action!r}")
+    env_var, label, rate_actions = group
+    setting_key = RATE_LIMIT_SETTING_KEYS[env_var]
+    await set_setting(db, setting_key, str(body.daily_limit), updated_by=current_user(request).username)
+    rate_limit_overrides.set_override(current_user(request).id, env_var, body.daily_limit)
+    return _rate_limit_status(action, env_var, label, rate_actions)
 
 
 # ---------------------------------------------------------------------------

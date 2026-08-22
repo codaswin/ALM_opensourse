@@ -66,6 +66,13 @@ export interface SettingValue {
   updated_at?: string;
 }
 
+export interface RateLimitStatus {
+  action: string;
+  label: string;
+  used: number;
+  limit: number;
+}
+
 export interface SystemStatus {
   paused: boolean;
   reason: string | null;

@@ -26,7 +26,7 @@
   --surface-2: var(--gray-200);
   --surface-muted: var(--gray-100);
   --text: var(--gray-900);
-  --text-soft: #8a8a8a;
+  --text-soft: #6b6b6b;
   --text-h: var(--gray-1000);
   --border: var(--gray-400);
   --border-strong: var(--gray-600);
@@ -43,11 +43,20 @@
   --accent-bg: rgba(0, 112, 243, 0.08);
   --accent-soft: #eff6ff;
   --accent-ring: rgba(0, 112, 243, 0.18);
+  /* Text-on-own-tint pairs (badges, banners) fall short of 4.5:1 at the
+     base --accent/--success/--danger brightness in light mode — measured
+     ~3.7-4.35:1 against their own *-bg tints. These deepened "-ink" variants
+     are for that one job only; icons/links/focus-rings keep using the
+     brighter base tokens above, unaffected. Dark mode's base tones already
+     clear 4.5:1 there, so its -ink tokens just alias the base color. */
+  --accent-ink: #0058c9;
 
   --success: #16845b;
   --success-bg: rgba(22, 132, 91, 0.09);
+  --success-ink: #0f6b48;
   --danger: #e5484d;
   --danger-bg: rgba(229, 72, 77, 0.08);
+  --danger-ink: #c2262b;
 
   /* --- Elevation ----------------------------------------------------------
      Borders carry hierarchy, not shadows — a flat, hairline aesthetic.
@@ -129,11 +138,14 @@
   --accent-bg: rgba(50, 145, 255, 0.14);
   --accent-soft: #0f1f30;
   --accent-ring: rgba(50, 145, 255, 0.22);
+  --accent-ink: var(--accent);
 
   --success: #4cc38a;
   --success-bg: rgba(76, 195, 138, 0.11);
+  --success-ink: var(--success);
   --danger: #ff6166;
   --danger-bg: rgba(255, 97, 102, 0.12);
+  --danger-ink: var(--danger);
 
   --shadow: 0 0 0 1px var(--border);
   --shadow-hover: 0 0 0 1px var(--border-strong);

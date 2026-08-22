@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { deleteCredentials, listCredentials, saveCredentials, testCredentials } from "../api";
+import { deleteCredentials, listCredentials, listRateLimits, saveCredentials, testCredentials, updateRateLimit } from "../api";
 import { ErrorBanner } from "../components/ErrorBanner";
-import type { ConnectionStatus, ConnectionTestResult, CredentialType, PlatformCredentialStatus } from "../types";
+import type { ConnectionStatus, ConnectionTestResult, CredentialType, PlatformCredentialStatus, RateLimitStatus } from "../types";
 
 // Platforms `POST /credentials/{id}/test` can actually reach live — the
 // rest (e.g. LinkedIn itself, which is an OAuth-connected-account handled
@@ -182,21 +182,99 @@ function PlatformCard({
   );
 }
 
+function RateLimitRow({ status, onChanged }: { status: RateLimitStatus; onChanged: () => void }) {
+  const [draft, setDraft] = useState(String(status.limit));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Keep the input in sync when a refresh brings back a value this row
+  // didn't just save itself (e.g. usage ticking up elsewhere) — but never
+  // clobber text the user is still mid-edit on.
+  useEffect(() => {
+    setDraft(String(status.limit));
+  }, [status.limit]);
+
+  const parsedDraft = Number(draft);
+  const isValidDraft = draft.trim() !== "" && Number.isInteger(parsedDraft) && parsedDraft >= 0;
+  const isDirty = isValidDraft && parsedDraft !== status.limit;
+  const pct = status.limit > 0 ? Math.min((status.used / status.limit) * 100, 100) : 100;
+  const atLimit = status.used >= status.limit;
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    try {
+      await updateRateLimit(status.action, parsedDraft);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form
+      className="card rate-limit-row"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (isDirty) void handleSave();
+      }}
+    >
+      <div className="card-title-row">
+        <h3>{status.label}</h3>
+        <span className={atLimit ? "badge badge-rejected" : "badge badge-neutral"}>
+          {status.used} of {status.limit} used today
+        </span>
+      </div>
+      <div className="cost-bar-track rate-limit-bar-track">
+        <div className={atLimit ? "cost-bar-fill cost-bar-over" : "cost-bar-fill"} style={{ width: `${pct}%` }} />
+      </div>
+      <ErrorBanner message={error} />
+      <div className="card-actions">
+        <label className="connection-field rate-limit-field">
+          Daily limit
+          <input
+            type="text"
+            inputMode="numeric"
+            aria-label={`Daily limit for ${status.label}`}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+        </label>
+        <button type="submit" disabled={saving || !isDirty}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function ConnectionsView({ currentUserId }: { currentUserId: string }) {
   const [platforms, setPlatforms] = useState<PlatformCredentialStatus[]>([]);
+  const [rateLimits, setRateLimits] = useState<RateLimitStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
-    try {
-      setPlatforms(await listCredentials());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
+    // Settled, not all — these are two independent sections of this page;
+    // one endpoint failing (e.g. a backend older than this frontend, still
+    // missing /rate-limits) shouldn't also blank out the credentials list
+    // that successfully loaded.
+    const [platformsResult, rateLimitsResult] = await Promise.allSettled([listCredentials(), listRateLimits()]);
+    if (platformsResult.status === "fulfilled") {
+      setPlatforms(platformsResult.value);
     }
+    if (rateLimitsResult.status === "fulfilled") {
+      setRateLimits(rateLimitsResult.value);
+    }
+    const failure = platformsResult.status === "rejected" ? platformsResult.reason : rateLimitsResult.status === "rejected" ? rateLimitsResult.reason : null;
+    if (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -216,6 +294,21 @@ export function ConnectionsView({ currentUserId }: { currentUserId: string }) {
         as a reminder of which one is on file.
       </p>
       <ErrorBanner message={error} />
+
+      {rateLimits.length > 0 && (
+        <div className="connection-group">
+          <h3 className="connection-group-title">LinkedIn API daily limits</h3>
+          <p className="connection-help rate-limit-intro">
+            Each cap resets at midnight UTC. Lower it to publish more cautiously, or raise it once you trust the
+            agents' judgment — the app will always refuse to go over whatever you set here.
+          </p>
+          <div className="card-list">
+            {rateLimits.map((status) => (
+              <RateLimitRow status={status} onChanged={() => void refresh()} key={status.action} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {groupPlatforms(platforms).map(([group, platformsInGroup]) => (
         <div key={group} className="connection-group">

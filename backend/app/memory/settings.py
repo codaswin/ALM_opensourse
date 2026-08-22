@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_setting import AgentSetting
@@ -44,10 +45,25 @@ async def set_setting(db: AsyncSession, key: str, value: str, updated_by: str) -
     if setting is None:
         setting = AgentSetting(user_id=user_id, key=key, value=value, updated_by=updated_by, updated_at=now)
         db.add(setting)
+        try:
+            await db.commit()
+        except IntegrityError:
+            # Two concurrent first-time writes to the same (user_id, key) —
+            # e.g. a rapid double-click on Save before the button disables —
+            # both see no existing row and both try to INSERT; the loser hits
+            # the composite primary key here instead of a clean update. Fall
+            # back to updating the row the winner just created.
+            await db.rollback()
+            setting = await db.get(AgentSetting, (user_id, key))
+            assert setting is not None
+            setting.value = value
+            setting.updated_by = updated_by
+            setting.updated_at = now
+            await db.commit()
     else:
         setting.value = value
         setting.updated_by = updated_by
         setting.updated_at = now
-    await db.commit()
+        await db.commit()
     await db.refresh(setting)
     return setting

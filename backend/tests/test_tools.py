@@ -267,6 +267,28 @@ class TestPublishAndSchedulePostSchemas:
         assert outcome["status"] == "success"
         assert outcome["result"]["status"] == "scheduled"
 
+    async def test_schedule_post_enforces_the_shared_posts_daily_cap(self, db_session, monkeypatch) -> None:
+        """Regression guard: schedule_post used to never call the rate
+
+        limiter at all, so it was completely unbounded even though it's
+        documented (app/safety/cost_cap.py's _ACTION_RATE_LIMITS, and the
+        Connections UI's "Posts (publish + schedule)" cap) as sharing
+        publish_post's daily cap.
+        """
+        monkeypatch.setenv("LINKEDIN_API_RATE_LIMIT_POSTS_DAILY", "1")
+        future = datetime.now(timezone.utc) + timedelta(days=1)
+
+        first = await registry_module.execute_tool(
+            "schedule_post", {"content": "first", "publish_at": future}, approved=True
+        )
+        assert first["status"] == "success"
+
+        second = await registry_module.execute_tool(
+            "schedule_post", {"content": "second", "publish_at": future}, approved=True
+        )
+        assert second["status"] == "error"
+        assert "daily rate cap" in second["error"].lower()
+
 
 
 class TestSearchXPostsReadOnly:

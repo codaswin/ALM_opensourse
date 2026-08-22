@@ -14,6 +14,7 @@ from app.local_identity import LocalIdentity
 from app.main import app, get_db
 from app.memory import platform_credentials
 from app.models.auth import DashboardUserRecord
+from app.tenancy import rate_limits as rate_limit_overrides
 from app.runtime import (
     APP_DATA_DIR_ENV,
     RUNTIME_MODE_ENV,
@@ -178,6 +179,7 @@ async def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> AsyncIterat
         await engine.dispose()
         reset_runtime_profile()
         platform_credentials.configure_desktop_store(None)
+        rate_limit_overrides.load_overlay({})
         _CURRENT_TEST_ADMIN_ID = None
 
 
@@ -281,6 +283,56 @@ async def test_update_setting_then_read_reflects_it(client: AsyncClient) -> None
 
     get_response = await client.get("/settings/research_agent.poll_interval")
     assert get_response.json()["value"] == "hourly"
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn daily rate limits
+# ---------------------------------------------------------------------------
+
+
+async def test_list_rate_limits_returns_all_five_actions_with_defaults(client: AsyncClient) -> None:
+    response = await client.get("/rate-limits")
+    assert response.status_code == 200
+    body = response.json()
+    actions = {row["action"]: row for row in body}
+    assert set(actions) == {"posts", "deletes", "replies", "connections", "likes"}
+    assert actions["posts"] == {"action": "posts", "label": "Posts (publish + schedule)", "used": 0, "limit": 3}
+    assert actions["likes"]["limit"] == 20
+
+
+async def test_update_rate_limit_then_list_reflects_it(client: AsyncClient) -> None:
+    put_response = await client.put("/rate-limits/posts", json={"daily_limit": 10})
+    assert put_response.status_code == 200
+    assert put_response.json() == {"action": "posts", "label": "Posts (publish + schedule)", "used": 0, "limit": 10}
+
+    list_response = await client.get("/rate-limits")
+    posts_row = next(row for row in list_response.json() if row["action"] == "posts")
+    assert posts_row["limit"] == 10
+
+
+async def test_update_rate_limit_enforced_immediately_without_restart(client: AsyncClient) -> None:
+    await client.put("/rate-limits/likes", json={"daily_limit": 1})
+
+    from app.tenancy import context as tenancy_context
+    from app.tools.rate_limit import RateLimitExceededError, daily_rate_limiter
+
+    token = tenancy_context.set_current_user_id(_CURRENT_TEST_ADMIN_ID)
+    try:
+        assert daily_rate_limiter.check_and_increment("like_post", "LINKEDIN_API_RATE_LIMIT_LIKES_DAILY") == 1
+        with pytest.raises(RateLimitExceededError):
+            daily_rate_limiter.check_and_increment("like_post", "LINKEDIN_API_RATE_LIMIT_LIKES_DAILY")
+    finally:
+        tenancy_context.reset_current_user_id(token)
+
+
+async def test_update_rate_limit_rejects_negative_value(client: AsyncClient) -> None:
+    response = await client.put("/rate-limits/posts", json={"daily_limit": -1})
+    assert response.status_code == 422
+
+
+async def test_update_unknown_rate_limit_action_404s(client: AsyncClient) -> None:
+    response = await client.put("/rate-limits/not_a_real_action", json={"daily_limit": 5})
+    assert response.status_code == 404
 
 
 # ---------------------------------------------------------------------------

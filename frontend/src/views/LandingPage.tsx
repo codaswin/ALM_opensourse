@@ -215,7 +215,7 @@ export function LandingPage({ onEnter }: { onEnter: () => void }) {
             </span>
           </div>
           <button type="button" className="landing-nav-cta" onClick={onEnter}>
-            Sign in <ArrowRight size={15} />
+            Open app <ArrowRight size={15} />
           </button>
         </div>
       </header>

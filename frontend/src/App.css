@@ -352,7 +352,7 @@
 
 .card-flag {
   font-size: 0.85rem;
-  color: var(--danger);
+  color: var(--danger-ink);
   background: var(--danger-bg);
   border-radius: 6px;
   padding: 0.4rem 0.6rem;
@@ -391,7 +391,7 @@
 .btn-reject:hover:not(:disabled) {
   background: var(--danger-bg);
   border-color: var(--danger);
-  color: var(--danger);
+  color: var(--danger-ink);
 }
 
 .badge {
@@ -403,23 +403,23 @@
   padding: 0.2rem 0.5rem;
   border-radius: 4px;
   background: var(--accent-bg);
-  color: var(--accent);
+  color: var(--accent-ink);
   white-space: nowrap;
 }
 
 .badge-pending {
   background: var(--accent-bg);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 .badge-approved {
   background: var(--success-bg);
-  color: var(--success);
+  color: var(--success-ink);
 }
 
 .badge-rejected {
   background: var(--danger-bg);
-  color: var(--danger);
+  color: var(--danger-ink);
 }
 
 .badge-neutral {
@@ -432,7 +432,7 @@
   padding: 0.5rem 0.75rem;
   border-radius: 6px;
   background: var(--accent-bg);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 0.85rem;
 }
 
@@ -473,7 +473,7 @@
 
 .error-banner {
   background: var(--danger-bg);
-  color: var(--danger);
+  color: var(--danger-ink);
   border-radius: 8px;
   padding: 0.6rem 0.9rem;
   margin-bottom: 1rem;
@@ -482,7 +482,7 @@
 
 .info-banner {
   background: var(--accent-bg);
-  color: var(--accent);
+  color: var(--accent-ink);
   border-radius: 8px;
   padding: 0.6rem 0.9rem;
   margin-bottom: 1rem;
@@ -520,6 +520,34 @@
 
 .cost-bar-over {
   background: var(--danger);
+}
+
+.rate-limit-intro {
+  margin-bottom: 0.75rem;
+}
+
+.rate-limit-row .card-title-row {
+  margin-bottom: 0.6rem;
+}
+
+.rate-limit-bar-track {
+  margin-bottom: 0.75rem;
+}
+
+.rate-limit-row .card-actions {
+  align-items: flex-end;
+}
+
+.rate-limit-field {
+  flex: 0 0 auto;
+}
+
+.rate-limit-row .card-actions .rate-limit-field input {
+  flex: 0 0 auto;
+  width: 6rem;
+  min-width: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .source-checkboxes {
@@ -784,7 +812,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
-  color: var(--accent);
+  color: var(--accent-ink);
   background: var(--accent-bg);
   border-radius: 4px;
   padding: 0.1rem 0.4rem;
@@ -1002,7 +1030,7 @@
 .connection-required-badge {
   margin-left: 0.5rem;
   background: var(--danger-bg);
-  color: var(--danger);
+  color: var(--danger-ink);
   font-size: 0.62rem;
   vertical-align: middle;
 }
