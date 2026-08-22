@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from app import automation
 from app.models.automation import ScheduledPostRecord
+from app.tools import publish_post as publish_post_module
 from app.tools import registry as registry_module
 
 registry_module._import_all_tools()
@@ -27,7 +28,7 @@ async def test_due_scheduled_post_is_published_once(db_session, monkeypatch: pyt
         calls.append(content)
         return {"status": "published"}
 
-    monkeypatch.setattr(automation, "publish_content", fake_publish)
+    monkeypatch.setattr(publish_post_module, "publish_content", fake_publish)
     first = await automation.process_due_posts("automation-test-user")
     second = await automation.process_due_posts("automation-test-user")
 
@@ -53,7 +54,7 @@ async def test_failed_scheduled_post_records_error(db_session, monkeypatch: pyte
     async def fail_publish(content: str):
         raise RuntimeError("provider unavailable")
 
-    monkeypatch.setattr(automation, "publish_content", fail_publish)
+    monkeypatch.setattr(publish_post_module, "publish_content", fail_publish)
     result = await automation.process_due_posts("automation-test-user")
 
     await db_session.refresh(record)
@@ -86,7 +87,7 @@ async def test_process_due_posts_only_claims_the_given_users_posts(db_session, m
         calls.append(content)
         return {"status": "published"}
 
-    monkeypatch.setattr(automation, "publish_content", fake_publish)
+    monkeypatch.setattr(publish_post_module, "publish_content", fake_publish)
     result = await automation.process_due_posts("automation-user-a")
 
     await db_session.refresh(mine)

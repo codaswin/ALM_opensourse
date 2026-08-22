@@ -240,6 +240,20 @@ async def _execute_claimed(db: AsyncSession, approval_id: str, decided_by: str, 
     return result
 
 
+async def execute_pre_approved(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Execute a gated tool whose approval was already recorded by an earlier,
+    separately-gated step — e.g. the scheduler publishing content that a human
+    approved when it was queued via `schedule_post` (itself `requires_approval=True`).
+
+    Keeps `execute_tool(..., approved=True)` confined to this module (the invariant
+    `app/safety/audit.py` guards) instead of letting a caller like `app/automation.py`
+    reach past the registry and call a tool's implementation directly — a defense-in-depth
+    gap flagged in review: bypassing `execute_tool` also skips its sandboxing/timeout
+    enforcement, not just the approval check.
+    """
+    return await execute_tool(tool_name, arguments, approved=True)
+
+
 async def approve(db: AsyncSession, approval_id: str, decided_by: str) -> dict[str, Any]:
     return await _execute_claimed(db, approval_id, decided_by, "pending")
 

@@ -6,7 +6,7 @@ from typing import Any
 import structlog
 from app.database import get_session_factory
 from app.models.automation import ScheduledPostRecord
-from app.tools.publish_post import publish_content
+from app.safety.approval_gate import execute_pre_approved
 from sqlalchemy import select, update
 
 logger = structlog.get_logger(__name__)
@@ -45,18 +45,14 @@ async def process_due_posts(user_id: str, now: datetime | None = None, limit: in
                 continue
             content = record.content
 
-        try:
-            publish_result: dict[str, Any] = await publish_content(content)
-        except Exception as exc:
-            async with factory() as db:
-                record = await db.get(ScheduledPostRecord, post_id)
-                if record is not None:
-                    record.status = "failed"
-                    record.last_error = str(exc)
-                    await db.commit()
-            failed += 1
-            logger.exception("scheduled_post_failed", scheduled_post_id=post_id)
-        else:
+        # Routed through approval_gate.execute_pre_approved(), which goes through the
+        # tool registry's execute_tool() — not a direct call to publish_post's
+        # implementation — so this path can never drift from the registry's centralized
+        # approval/sandboxing enforcement. Pre-approved is legitimate here because
+        # schedule_post itself requires_approval=True and this content only reached
+        # scheduled_posts after a human already approved it.
+        publish_result: dict[str, Any] = await execute_pre_approved("publish_post", {"content": content})
+        if publish_result.get("status") == "success":
             async with factory() as db:
                 record = await db.get(ScheduledPostRecord, post_id)
                 if record is not None:
@@ -66,5 +62,15 @@ async def process_due_posts(user_id: str, now: datetime | None = None, limit: in
                     await db.commit()
             published += 1
             logger.info("scheduled_post_published", scheduled_post_id=post_id, result=publish_result)
+        else:
+            error_message = publish_result.get("error") or f"publish_post returned status {publish_result.get('status')!r}"
+            async with factory() as db:
+                record = await db.get(ScheduledPostRecord, post_id)
+                if record is not None:
+                    record.status = "failed"
+                    record.last_error = error_message
+                    await db.commit()
+            failed += 1
+            logger.error("scheduled_post_failed", scheduled_post_id=post_id, result=publish_result)
 
     return {"claimed": claimed_count, "published": published, "failed": failed}

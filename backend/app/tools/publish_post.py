@@ -15,16 +15,7 @@ class PublishPostArgs(BaseModel):
     content: str = Field(..., min_length=1)
 
 
-@registry.register(
-    ToolDefinition(
-        name="publish_post",
-        description="Publish post content immediately to LinkedIn, via Composio",
-        requires_approval=True,
-    ),
-    schema=PublishPostArgs,
-)
 async def publish_content(content: str) -> dict[str, t.Any]:
-    # Direct calls are reserved for approved items claimed by the scheduled publishing worker.
     # `author` and `commentary` are LINKEDIN_CREATE_LINKED_IN_POST's real required fields —
     # verified live against Composio's own schema (GET /api/v3/tools/LINKEDIN_CREATE_LINKED_IN_POST),
     # not guessed. `author` is a LinkedIn URN (e.g. urn:li:person:...), not free text — see
@@ -35,5 +26,13 @@ async def publish_content(content: str) -> dict[str, t.Any]:
     return {"status": "published", "content": content, "composio_response": response}
 
 
+@registry.register(
+    ToolDefinition(
+        name="publish_post",
+        description="Publish post content immediately to LinkedIn, via Composio",
+        requires_approval=True,
+    ),
+    schema=PublishPostArgs,
+)
 async def execute(args: PublishPostArgs) -> dict[str, t.Any]:
     return await publish_content(args.content)

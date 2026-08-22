@@ -267,6 +267,45 @@ class TestPublishAndSchedulePostSchemas:
         assert outcome["status"] == "success"
         assert outcome["result"]["status"] == "scheduled"
 
+    async def test_publish_post_sends_the_content_string_to_composio(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Regression coverage: execute_tool() calls a registered tool's fn as
+
+        fn(validated_args), passing the tool's Pydantic *args instance* — not the
+        raw dict. publish_post's registered fn must accept that instance (like
+        every other tool's `execute(args)`) and unwrap `.content` before it reaches
+        Composio; the tool's decorator used to sit directly on `publish_content(content:
+        str)`, so an approved execute_tool("publish_post", ...) call handed the whole
+        PublishPostArgs object to a parameter typed as a plain string, and the LinkedIn
+        post would have gone out with the object's repr as its body instead of the
+        approved text.
+        """
+        monkeypatch.setenv("LINKEDIN_API_RATE_LIMIT_POSTS_DAILY", "5")
+
+        from app.tools import publish_post as publish_post_module
+
+        captured: dict[str, object] = {}
+
+        async def fake_get_linkedin_author_urn() -> str:
+            return "urn:li:person:test"
+
+        async def fake_execute_linkedin_action(action_slug: str, arguments: dict) -> dict:
+            captured["action_slug"] = action_slug
+            captured["arguments"] = arguments
+            return {"successful": True}
+
+        monkeypatch.setattr(publish_post_module, "get_linkedin_author_urn", fake_get_linkedin_author_urn)
+        monkeypatch.setattr(publish_post_module, "execute_linkedin_action", fake_execute_linkedin_action)
+
+        outcome = await registry_module.execute_tool(
+            "publish_post", {"content": "Hello, LinkedIn!"}, approved=True
+        )
+
+        assert outcome["status"] == "success"
+        assert captured["arguments"] == {
+            "author": "urn:li:person:test",
+            "commentary": "Hello, LinkedIn!",
+        }
+
     async def test_schedule_post_enforces_the_shared_posts_daily_cap(self, db_session, monkeypatch) -> None:
         """Regression guard: schedule_post used to never call the rate
 
