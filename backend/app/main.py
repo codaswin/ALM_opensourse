@@ -136,7 +136,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="AI LinkedIn Manager",
     description="Runtime API for agent settings, the human-approval queue, and the self-learning review queue.",
-    version="0.2.2",
+    version="0.2.3",
     lifespan=lifespan,
     docs_url=None if _production_mode() else "/docs",
     redoc_url=None if _production_mode() else "/redoc",
