@@ -57,7 +57,7 @@ function PlatformCard({
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const canSave = platform.fields.every((f) => (draft[f.name] ?? "").trim());
+  const canSave = platform.fields.every((f) => !f.required || (draft[f.name] ?? "").trim());
 
   async function handleTest() {
     setTesting(true);
@@ -127,6 +127,9 @@ function PlatformCard({
         <p className="connection-help">
           Your Composio entity ID is <code className="mono-chip">{currentUserId}</code> — use this when creating
           your LinkedIn connected account in Composio's own dashboard, so it resolves back to your workspace here.
+          If the account already exists under a different entity (Composio defaults new connections to{" "}
+          <code className="mono-chip">default</code>), set the Entity ID override on the Composio card below instead
+          of recreating the connection.
         </p>
       )}
       <ErrorBanner message={error} />

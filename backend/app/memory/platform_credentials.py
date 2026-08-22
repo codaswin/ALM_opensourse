@@ -45,6 +45,7 @@ class CredentialFieldStatus(TypedDict):
     name: str
     label: str
     secret: bool
+    required: bool
     placeholder: str
     status: FieldStatus
     masked_preview: str | None
@@ -69,6 +70,7 @@ class CredentialField:
     label: str
     placeholder: str
     secret: bool = True
+    required: bool = True
 
 
 @dataclass(frozen=True)
@@ -100,9 +102,19 @@ PLATFORM_SCHEMA: tuple[PlatformDefinition, ...] = (
         group="Publishing to LinkedIn",
         credential_type="api_key",
         summary="API key for executing LinkedIn/X toolkit actions through Composio.",
-        help_text="Required before any approved LinkedIn action can execute.",
+        help_text=(
+            "Required before any approved LinkedIn action can execute. If publishing fails with "
+            "'Connected account user ID does not match the provided user ID', set Entity ID below to "
+            "whatever entity your connected account actually lives under in Composio's dashboard "
+            "(often \"default\") — leave it blank to use this app's own user id."
+        ),
         required=True,
-        fields=(CredentialField("api_key", "COMPOSIO_API_KEY", "API key", "composio_xxx"),),
+        fields=(
+            CredentialField("api_key", "COMPOSIO_API_KEY", "API key", "composio_xxx"),
+            CredentialField(
+                "entity_id", "COMPOSIO_ENTITY_ID", "Entity ID (optional)", "default", secret=False, required=False
+            ),
+        ),
     ),
     PlatformDefinition(
         id="openai",
@@ -261,6 +273,7 @@ async def list_platform_status(db: AsyncSession, user_id: str) -> list[PlatformS
                 "name": field.name,
                 "label": field.label,
                 "secret": field.secret,
+                "required": field.required,
                 "placeholder": field.placeholder,
                 "status": status,
                 "masked_preview": masked_preview,
@@ -273,7 +286,11 @@ async def list_platform_status(db: AsyncSession, user_id: str) -> list[PlatformS
             "summary": platform.summary,
             "help_text": platform.help_text,
             "required": platform.required,
-            "connected": all(field["status"] != "not_set" for field in fields),
+            "connected": all(
+                field["status"] != "not_set"
+                for field, cred_field in zip(fields, platform.fields)
+                if cred_field.required
+            ),
             "fields": fields,
         })
     return statuses
@@ -282,7 +299,9 @@ async def list_platform_status(db: AsyncSession, user_id: str) -> list[PlatformS
 async def save_platform_credentials(db: AsyncSession, user_id: str, platform_id: str, values: dict[str, str]) -> None:
     platform = _get_platform(platform_id)
     expected_fields = {field.name for field in platform.fields}
-    missing = [field.name for field in platform.fields if not values.get(field.name, "").strip()]
+    missing = [
+        field.name for field in platform.fields if field.required and not values.get(field.name, "").strip()
+    ]
     extra = sorted(set(values) - expected_fields)
     if missing:
         raise ValueError(f"Missing required credential field(s) for {platform_id!r}: {', '.join(missing)}")
@@ -298,7 +317,18 @@ async def save_platform_credentials(db: AsyncSession, user_id: str, platform_id:
         )
     )
     for field in platform.fields:
-        raw_value = values[field.name].strip()
+        raw_value = values.get(field.name, "").strip()
+        if not raw_value:
+            # Only reachable for an optional field left blank (required fields
+            # are guaranteed non-empty by the `missing` check above) — clear
+            # any previously saved value instead of persisting an empty record.
+            if desktop_store is not None:
+                desktop_store.delete(user_id, field.env_var)
+            if is_global:
+                os.environ.pop(field.env_var, None)
+            else:
+                tenancy_credentials.clear_credential(user_id, field.env_var)
+            continue
         db.add(PlatformCredentialRecord(
             id=_record_id(user_id, platform_id, field.name),
             user_id=user_id,

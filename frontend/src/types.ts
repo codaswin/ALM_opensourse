@@ -153,6 +153,7 @@ export interface CredentialFieldStatusInfo {
   name: string;
   label: string;
   secret: boolean;
+  required: boolean;
   placeholder: string;
   status: CredentialFieldStatus;
   masked_preview: string | null;

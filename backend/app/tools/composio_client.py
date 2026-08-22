@@ -67,12 +67,19 @@ def get_composio_entity_id() -> str:
     Composio calls this the "entity" — an identifier you choose to represent
     an end user when a connected account is created; Composio's own execute
     API rejects a call without it ("User ID is required with connected
-    account", verified live). Each dashboard user's own id doubles as their
-    Composio entity id, so their LinkedIn/X connected account (created
-    directly in Composio's own dashboard, outside this app) must be created
-    under that same entity id for this to resolve correctly.
+    account", verified live). By default, each dashboard user's own id
+    doubles as their Composio entity id, so a LinkedIn/X connected account
+    (created directly in Composio's own dashboard, outside this app) must be
+    created under that same entity id for this to resolve correctly.
+
+    Composio's dashboard defaults new connections to the entity "default"
+    rather than any app-generated id, so that assumption often doesn't hold
+    in practice (fails with Composio's own "ActionExecute_ConnectedAccountEntityIdMismatch",
+    "Connected account user ID does not match the provided user ID"). The
+    optional COMPOSIO_ENTITY_ID credential lets a user override it to
+    whatever entity id their connected account actually lives under.
     """
-    return get_current_user_id()
+    return resolve_credential("COMPOSIO_ENTITY_ID") or get_current_user_id()
 
 
 async def execute_linkedin_action(action_slug: str, arguments: dict[str, t.Any]) -> dict[str, t.Any]:
