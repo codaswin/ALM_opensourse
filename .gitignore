@@ -196,4 +196,15 @@ build/
 
 .local
 
+
+# ============================================================
+# STRIX / PENTEST SCAN ARTIFACTS — local-only, not for GitHub
+# ============================================================
+# Strix (security-scan) run output, its scope/instruction file, and the
+# app-data dir spun up for its live dynamic-validation target. None of
+# these are useful to other contributors and some (scan scope, live app
+# state/db) shouldn't be public.
 /check/
+/strix_runs/
+/pentest-instruction.md
+backend/.runtime-validation-appdata/

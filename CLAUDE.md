@@ -20,31 +20,6 @@
 
 ## Project Structure
 
-```
-project/
-├── backend/
-│   └── app/
-│       ├── main.py, config.py, database.py
-│       ├── harness/          # the agent loop / runtime
-│       ├── agents/           # runtime agent definitions (roles, prompts, goals)
-│       ├── tools/             # tool schemas + implementations
-│       ├── memory/           # working, episodic, semantic memory
-│       ├── rag/               # ingestion + retrieval pipeline
-│       ├── context/           # context assembly + budget management
-│       ├── safety/            # guardrails, approval gates
-│       ├── llmops/            # model routing, tracing, cost tracking
-│       ├── learning/          # feedback capture, reflection
-│       └── models/
-│   ├── evals/                 # eval harness, golden datasets
-│   └── tests/
-├── frontend/                  # optional observability dashboard
-├── src-tauri/                 # native desktop shell and sidecar lifecycle
-├── skills/            # 9 skill files — full runnable code
-├── agents/            # build-time agent definitions (Claude Code agents)
-├── .claude/commands/  # /setup-project, /generate-prp, /execute-prp
-└── PRPs/
-```
-
 **Important distinction:** `agents/` at the project root are the **build-time agents** (Claude Code sub-agents that write code). `backend/app/agents/` are the **runtime agents** — the actual AI agents your product runs in production. Don't conflate them.
 
 ---
@@ -141,14 +116,4 @@ python -m backend.app.safety.audit          # confirms no ungated risky tools
 
 ## Environment Variables
 
-```env
-DATABASE_URL=postgresql://user:pass@localhost:5432/db
-REDIS_URL=redis://localhost:6379/0
-OPENAI_API_KEY=sk-xxx
-ANTHROPIC_API_KEY=sk-ant-xxx
-HERMES_ENDPOINT=http://localhost:8001/v1        # self-hosted worker model, if used
-VECTOR_DB_PATH=./data/faiss_index
-KG_BACKEND=networkx                              # or neo4j://...
-LLM_COST_BUDGET_DAILY_USD=50
-TRACE_SINK=local                                 # or langfuse/phoenix endpoint
-```
+See `.env.example` for the full, current list of environment variables and their expected format.
