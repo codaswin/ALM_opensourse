@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="380" viewBox="0 0 1200 380" role="img" aria-labelledby="title description">
+  <title id="title">AI LinkedIn Manager</title>
+  <desc id="description">A local-first, human-controlled AI workspace for LinkedIn, available for Windows and Linux.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111f"/>
+      <stop offset="0.55" stop-color="#0f2855"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#60a5fa" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#60a5fa" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#020617" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="380" rx="28" fill="url(#background)"/>
+  <circle cx="1020" cy="75" r="260" fill="url(#glow)"/>
+  <circle cx="135" cy="360" r="260" fill="url(#glow)"/>
+  <g opacity="0.15" fill="none" stroke="#bfdbfe" stroke-width="2">
+    <path d="M0 75 H1200 M0 150 H1200 M0 225 H1200 M0 300 H1200"/>
+    <path d="M150 0 V380 M300 0 V380 M450 0 V380 M600 0 V380 M750 0 V380 M900 0 V380 M1050 0 V380"/>
+  </g>
+  <g transform="translate(110 88)" filter="url(#shadow)">
+    <rect width="204" height="204" rx="48" fill="#0f172a" stroke="#60a5fa" stroke-width="3"/>
+    <g fill="none" stroke="#f8fafc" stroke-width="9" stroke-linecap="round">
+      <line x1="102" y1="108" x2="102" y2="54"/>
+      <line x1="102" y1="108" x2="58" y2="136"/>
+      <line x1="102" y1="108" x2="146" y2="136"/>
+    </g>
+    <circle cx="102" cy="108" r="25" fill="#f8fafc"/>
+    <circle cx="102" cy="54" r="17" fill="#93c5fd"/>
+    <circle cx="58" cy="136" r="17" fill="#93c5fd"/>
+    <circle cx="146" cy="136" r="17" fill="#93c5fd"/>
+    <circle cx="102" cy="108" r="11" fill="#2563eb"/>
+  </g>
+  <g font-family="Inter, Segoe UI, Arial, sans-serif" fill="#f8fafc">
+    <text x="365" y="125" font-size="23" font-weight="600" letter-spacing="3" fill="#93c5fd">LOCAL-FIRST · HUMAN-CONTROLLED</text>
+    <text x="365" y="190" font-size="52" font-weight="750">AI LinkedIn Manager</text>
+    <text x="365" y="238" font-size="24" fill="#dbeafe">Research, write, engage, and learn—without giving up control.</text>
+    <g transform="translate(365 275)">
+      <rect width="170" height="42" rx="21" fill="#f8fafc" fill-opacity="0.12" stroke="#bfdbfe" stroke-opacity="0.5"/>
+      <text x="85" y="28" text-anchor="middle" font-size="18" font-weight="650">Windows 10/11</text>
+      <rect x="188" width="130" height="42" rx="21" fill="#f8fafc" fill-opacity="0.12" stroke="#bfdbfe" stroke-opacity="0.5"/>
+      <text x="253" y="28" text-anchor="middle" font-size="18" font-weight="650">Linux</text>
+      <rect x="336" width="160" height="42" rx="21" fill="#f8fafc" fill-opacity="0.12" stroke="#bfdbfe" stroke-opacity="0.5"/>
+      <text x="416" y="28" text-anchor="middle" font-size="18" font-weight="650">Open Source</text>
+    </g>
+  </g>
+</svg>
