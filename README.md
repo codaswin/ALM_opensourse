@@ -66,7 +66,15 @@ curl -fsSL https://raw.githubusercontent.com/codaswin/ALM_opensourse/main/instal
 
 Downloads the latest release and installs it with your system's package manager (`.deb` via `apt`, `.rpm` via `dnf`, or a standalone `.AppImage` as a fallback) — no cloning, no build tools, nothing else required. Read the script before piping it to `bash` if you'd rather not blindly trust a curl-pipe: [`install.sh`](install.sh).
 
-This is an early, **unsigned** build — there's no Apple/Microsoft code-signing certificate behind it (those cost money and aren't set up yet), and no signed auto-update mechanism, so the app won't self-update; check the [Releases page](https://github.com/codaswin/ALM_opensourse/releases) for new versions. Windows and macOS installers aren't published yet — see Option B below to build for those platforms yourself in the meantime.
+### Option A — one-line install (Windows)
+
+```powershell
+irm https://raw.githubusercontent.com/codaswin/ALM_opensourse/main/install.ps1 | iex
+```
+
+Run in PowerShell. Downloads the latest release's `.msi` and launches the standard Windows installer wizard — no cloning, no build tools, nothing else required. Read the script first if you'd rather not blindly trust an `irm | iex` pipe: [`install.ps1`](install.ps1).
+
+Both of these are early, **unsigned** builds — there's no Apple/Microsoft code-signing certificate behind them (those cost money and aren't set up yet), and no signed auto-update mechanism, so the app won't self-update; check the [Releases page](https://github.com/codaswin/ALM_opensourse/releases) for new versions. Windows SmartScreen and Linux package managers will both warn about an unrecognized/unsigned publisher on first run — that's expected until this project has a signing identity. macOS installers aren't published yet — see Option B below to build for it yourself in the meantime.
 
 ### Option B — build from source (all platforms)
 
@@ -793,7 +801,7 @@ Current state: **581 tests passing**, ruff/mypy clean, frontend lint/build clean
 
 ## Project Status
 
-Honest state, not aspirational: **version 0.2.0 has real, downloadable Linux installers — still unsigned, and Windows/macOS aren't published yet.**
+Honest state, not aspirational: **version 0.2.3 has real, downloadable Linux and Windows installers — both still unsigned, and macOS isn't published yet.**
 
 What's real and tested today:
 
@@ -803,7 +811,8 @@ What's real and tested today:
 
 What's not done yet:
 
-- **Windows and macOS installers** haven't been built and published — only compiled (`cargo check`) on GitHub-hosted CI runners so far. There's no guarantee a packaged build behaves identically there until real installers are built and smoke-tested.
+- **Windows installers are built and published** (`.msi`/`.exe` via `.github/workflows/release.yml`, same tag-triggered pipeline as Linux) but **not yet smoke-tested on a real Windows machine** the way Linux has been — only compiled (`cargo check`) on GitHub-hosted Windows runners before this. Treat the first few Windows releases as early and report install/launch issues.
+- **macOS installers** haven't been built and published — only compiled (`cargo check`) on GitHub-hosted CI runners so far.
 - **No code-signing, notarization, or auto-update mechanism** exists yet — the published installers are unsigned, and the app won't self-update. That's a deliberate choice: shipping a real, secure signing/update pipeline is real infrastructure work, not something to fake. Check the [Releases page](https://github.com/codaswin/ALM_opensourse/releases) for new versions manually in the meantime.
 
 See [`docs/desktop-implementation-status.md`](docs/desktop-implementation-status.md) for the detailed, continuously-updated list of what's verified vs. still open, and [`docs/desktop-migration-audit.md`](docs/desktop-migration-audit.md) for how the desktop shell was designed.
@@ -828,11 +837,13 @@ See [`docs/desktop-implementation-status.md`](docs/desktop-implementation-status
 - [x] Desktop runtime — Tauri shell, frozen Python sidecar, SQLite + OS keyring, no login, no PostgreSQL/Redis dependency
 - [x] Live-tested provider connectivity checks (`POST /credentials/{id}/test`) and a Diagnostics view for every backing service
 - [x] Production hardening: OS keyring credential storage, Alembic-first startup with pre-migration backup, durable lock-protected FAISS snapshots, CI (backend + frontend + native desktop compile matrix), and centralized Python tooling config
-- [x] A GitHub Releases page with downloadable Linux artifacts, published automatically by `.github/workflows/release.yml` on every version tag, plus a one-line installer script
+- [x] A GitHub Releases page with downloadable Linux and Windows artifacts, published automatically by `.github/workflows/release.yml` on every version tag, plus one-line installer scripts for both
 - [x] Desktop-only cleanup — the self-hosted/multi-user dashboard login and Docker/VPS deployment infrastructure have been fully removed from this repository
 
 **In progress / explicitly not done:**
-- [ ] Signed Windows and macOS installers, built and smoke-tested on native machines
+- [ ] Windows installer smoke-tested on a native machine (currently CI-built only, unlike Linux's smoke-tested pipeline)
+- [ ] macOS installer built and published at all
+- [ ] Signed Windows and macOS installers
 - [ ] Code signing, notarization, and an auto-updater
 
 **Explicitly post-MVP (per the original spec):**
