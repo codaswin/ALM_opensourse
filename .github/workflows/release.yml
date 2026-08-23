@@ -162,6 +162,14 @@ jobs:
             in practice (Windows SmartScreen and Linux package managers will
             both warn about an unrecognized/unsigned publisher on first run —
             that's expected until this project has a signing identity).
+          # actions/upload-artifact preserves the bundle/{appimage,deb,rpm,msi,nsis}
+          # subdirectory structure, so after download-artifact the files are nested
+          # (e.g. dist/linux-bundles/appimage/*.AppImage) — a flat dist/linux-bundles/*
+          # glob matches nothing here, which is why the first run of this job
+          # "succeeded" but silently attached zero assets to the release.
           files: |
-            dist/linux-bundles/*
-            dist/windows-bundles/*
+            dist/linux-bundles/**/*.AppImage
+            dist/linux-bundles/**/*.deb
+            dist/linux-bundles/**/*.rpm
+            dist/windows-bundles/**/*.msi
+            dist/windows-bundles/**/*.exe
