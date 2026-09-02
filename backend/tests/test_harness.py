@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -274,3 +275,18 @@ async def test_non_safety_critical_failure_raises_after_exhausting_retries() -> 
         await with_retry(always_fails, max_retries=2, base_delay=0.0)
 
     assert calls == 3
+
+
+@pytest.mark.asyncio
+async def test_cancellation_is_never_retried() -> None:
+    calls = 0
+
+    async def cancelled() -> None:
+        nonlocal calls
+        calls += 1
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await with_retry(cancelled, max_retries=2, base_delay=0.0)
+
+    assert calls == 1

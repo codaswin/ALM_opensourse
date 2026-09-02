@@ -65,6 +65,11 @@ async def with_retry(
     while True:
         try:
             return await fn(*args, **kwargs)
+        except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+            # Cooperative cancellation and interpreter shutdown are never
+            # retryable: sleeping + re-invoking fn here would swallow the
+            # cancellation and stall task teardown. Propagate immediately.
+            raise
         except BaseException as exc:
             if classify(exc):
                 raise
